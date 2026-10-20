@@ -19,7 +19,7 @@ export function parseBackup(text: string): Envelope {
       dailyLimit:f.dailyLimit===null?null:requireNumber(f,'dailyLimit'),monthlyLimit:f.monthlyLimit===null?null:requireNumber(f,'monthlyLimit')};
   });
   const portfolio:Portfolio={version:1,demo:x.demo as boolean,cash:requireNumber(x,'cash'),bonds:requireNumber(x,'bonds'),budget:requireNumber(x,'budget'),days:requireNumber(x,'days'),threshold:requireNumber(x,'threshold'),cashShock:requireNumber(x,'cashShock'),bondShock:requireNumber(x,'bondShock'),categories,funds};
-  const issues=validate(portfolio);if(issues.length)throw new Error(issues.join('\n'));
+  const issues=validate(portfolio,{requireTargets:false});if(issues.length)throw new Error(issues.join('\n'));
   return {app:'portfolio-pilot',schemaVersion:1,savedAt:raw.savedAt,portfolio};
 }
 export function downloadText(text:string,filename:string,type='application/json') {

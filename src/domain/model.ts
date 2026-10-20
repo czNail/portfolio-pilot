@@ -31,12 +31,26 @@ export function demoPortfolio(): Portfolio {
     {id:'demo-4',name:'黄金基金 A',categoryId:'gold',value:5000,dailyLimit:null,monthlyLimit:null,minimum:10,step:10,weight:1,paused:false},
   ] };
 }
-export function validate(p: Portfolio): string[] {
+function checkMoney(n: number, label: string, issues: string[], max = MONEY_MAX) {
+  if (!Number.isFinite(n) || n < 0 || n > max || Math.abs(n * 100 - Math.round(n * 100)) > .0001) issues.push(`${label}应为 0～${max.toLocaleString()} 元，最多两位小数。`);
+}
+export function createFund(categoryId: string): Fund {
+  return {id:newId('fund'),name:'',categoryId,value:0,dailyLimit:null,monthlyLimit:null,minimum:0,step:1,weight:1,paused:false};
+}
+export function validateFund(f: Fund, categories: readonly Category[]): string[] {
+  const issues: string[] = [], name = f.name || '未命名基金';
+  if (!f.name.trim() || f.name.length > 80) issues.push('请填写基金名称或代码，最多 80 个字符。');
+  if (!categories.some(c=>c.id===f.categoryId)) issues.push(`${name}没有有效的资产类别。`);
+  checkMoney(f.value,`${name}市值`,issues); checkMoney(f.minimum,`${name}最低申购额`,issues);
+  if (f.dailyLimit !== null) checkMoney(f.dailyLimit,`${name}日限额`,issues);
+  if (f.monthlyLimit !== null) checkMoney(f.monthlyLimit,`${name}月限额`,issues);
+  if (!Number.isFinite(f.step) || !Number.isInteger(f.step) || f.step < 1 || f.step > BUDGET_MAX) issues.push(`${name}的购买步长应为 1～1,000,000 元的整数。`);
+  if (!Number.isInteger(f.weight) || f.weight < 1 || f.weight > 100) issues.push(`${name}的分配权重应为 1～100 的整数。`);
+  return issues;
+}
+export function validate(p: Portfolio, {requireTargets = true}: {requireTargets?: boolean} = {}): string[] {
   const issues: string[] = [];
-  const money = (n: number, label: string, max = MONEY_MAX) => {
-    if (!Number.isFinite(n) || n < 0 || n > max || Math.abs(n * 100 - Math.round(n * 100)) > .0001) issues.push(`${label}应为 0～${max.toLocaleString()} 元，最多两位小数。`);
-  };
-  money(p.cash,'存款'); money(p.bonds,'债券'); money(p.budget,'每月预算',BUDGET_MAX);
+  checkMoney(p.cash,'存款',issues); checkMoney(p.bonds,'债券',issues); checkMoney(p.budget,'每月预算',issues,BUDGET_MAX);
   if (!Number.isInteger(p.days) || p.days < 1 || p.days > 31) issues.push('可执行日应为 1～31 的整数。');
   for (const [n, label] of [[p.threshold,'预警阈值'],[p.cashShock,'存款跌幅'],[p.bondShock,'债券跌幅']] as const) if (!Number.isFinite(n) || n < 0 || n > 100) issues.push(`${label}应在 0～100% 之间。`);
   if (p.categories.length < 1 || p.categories.length > 8) issues.push('资产类别数量应为 1～8 个。');
@@ -49,19 +63,10 @@ export function validate(p: Portfolio): string[] {
     if (!Number.isFinite(c.shock) || c.shock < 0 || c.shock > 100) issues.push(`${c.name || '类别'}的情景跌幅应在 0～100% 之间。`);
     total += c.target;
   }
-  if (Math.abs(total-100) > .00001) issues.push(`基金目标比例合计为 ${Number(total.toFixed(2))}%，需要等于 100%。`);
+  if (requireTargets && Math.abs(total-100) > .00001) issues.push(`基金目标比例合计为 ${Number(total.toFixed(2))}%，需要等于 100%。`);
   if (p.funds.length > 40) issues.push('最多支持 40 只基金。');
   if (new Set(p.funds.map(f=>f.id)).size !== p.funds.length) issues.push('基金标识不能重复。');
-  for (const f of p.funds) {
-    const name = f.name || '未命名基金';
-    if (!f.name.trim() || f.name.length > 80) issues.push('基金名称应为 1～80 个字符。');
-    if (!categoryIds.has(f.categoryId)) issues.push(`${name}没有有效的资产类别。`);
-    money(f.value,`${name}市值`); money(f.minimum,`${name}最低申购额`);
-    if (f.dailyLimit !== null) money(f.dailyLimit,`${name}日限额`);
-    if (f.monthlyLimit !== null) money(f.monthlyLimit,`${name}月限额`);
-    if (!Number.isFinite(f.step) || !Number.isInteger(f.step) || f.step < 1 || f.step > BUDGET_MAX) issues.push(`${name}的购买步长应为 1～1,000,000 元的整数。`);
-    if (!Number.isInteger(f.weight) || f.weight < 1 || f.weight > 100) issues.push(`${name}的分配权重应为 1～100 的整数。`);
-  }
+  for (const f of p.funds) issues.push(...validateFund(f,p.categories));
   return [...new Set(issues)];
 }
 export function totals(p: Portfolio) {

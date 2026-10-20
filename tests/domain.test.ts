@@ -99,3 +99,7 @@ test('单位步长且无最低额空隙时，与小规模穷举的平方缺口�
   }
 });
 test('最大预算与最小步长可完成分配',()=>{const r=invariant(one({budget:1_000_000}));assert.equal(r.spent,1_000_000);});
+test('新基金默认1元步长不会挤占同类已有10元步长基金的预算',()=>{
+  const p=one({budget:300,funds:[fund({id:'old',step:10,minimum:10}),fund({id:'new',step:1,minimum:0})]});
+  assert.deepEqual(invariant(p).funds.map(f=>f.amount),[150,150]);
+});

@@ -50,15 +50,19 @@ export function rebalance(p: Portfolio): Plan {
   let available=budget,iterations=0;
   while(available>0) {
     let best=-1,bestGain=-Infinity,bestFair=Infinity;
+    // 先在同类基金中按权重挑选下一笔，避免较小的默认步长挤占其他基金。
+    const candidates=new Map<number,{index:number;amount:number;fairness:number}>();
     for(let i=0;i<state.length;i++) {
-      const s=state[i]; if(s.next===null)continue;
+      const s=state[i];if(s.next===null)continue;
       const amount=(s.next-s.units)*s.limit.step;
       const deficit=targets[s.cat]-current[s.cat]-categoryBuy[s.cat];
-      // 不买入已超配的大类，也不因最小申购额跨过满额投入时的目标。
       if(amount>available || amount>deficit+1e-6)continue;
-      const gain=2*deficit-amount; // 每单位资金带来的平方缺口改善。
-      const fairness=yuan(s.next*s.limit.step)/s.fund.weight;
-      if(gain>bestGain+1e-6 || (Math.abs(gain-bestGain)<1e-6 && fairness<bestFair-1e-9)) {best=i;bestGain=gain;bestFair=fairness;}
+      const fairness=yuan(s.next*s.limit.step)/s.fund.weight,old=candidates.get(s.cat);
+      if(!old||fairness<old.fairness-1e-9)candidates.set(s.cat,{index:i,amount,fairness});
+    }
+    for(const [cat,candidate] of candidates) {
+      const gain=2*(targets[cat]-current[cat]-categoryBuy[cat])-candidate.amount;
+      if(gain>bestGain+1e-6 || (Math.abs(gain-bestGain)<1e-6 && candidate.fairness<bestFair-1e-9)) {best=candidate.index;bestGain=gain;bestFair=candidate.fairness;}
     }
     if(best<0)break;
     const s=state[best],next=s.next!;
@@ -78,7 +82,7 @@ export function rebalance(p: Portfolio): Plan {
   };
 }
 export function stress(p: Portfolio, plan?: Plan) {
-  const errors=validate(p);if(errors.length)throw new Error(errors.join('\n'));
+  const errors=validate(p,{requireTargets:false});if(errors.length)throw new Error(errors.join('\n'));
   const fundTotal=p.funds.reduce((s,f)=>s+cents(f.value),0);
   const rows=p.categories.map(c=>{
     const current=p.funds.filter(f=>f.categoryId===c.id).reduce((s,f)=>s+cents(f.value),0);

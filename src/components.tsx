@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { parseNumberInput } from './domain/input';
 export const money=(n:number)=>new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
 export const pct=(n:number)=>`${n.toFixed(2)}%`;
 export const colors=['#397faa','#69a999','#c9a35e','#a48dba','#d68e73','#7daab6','#a3ae6c','#b97b93'];
@@ -24,11 +25,12 @@ export function Icon({name,size=20}:{name:string;size?:number}) {
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]||paths.info}/></svg>;
 }
-export function NumberField({label,value,onChange,suffix='元',nullable=false,min=0,max,step='0.01',help}:{label:string;value:number|null;onChange:(v:number|null)=>void;suffix?:string;nullable?:boolean;min?:number;max?:number;step?:string;help?:string}) {
-  const [text,setText]=useState(value===null?'':String(value));
+export function NumberField({label,value,onChange,suffix='元',nullable=false,min=0,max,step='0.01',help,emptyZero=false,placeholder,hideLabel=false}:{label:string;value:number|null;onChange:(v:number|null)=>void;suffix?:string;nullable?:boolean;min?:number;max?:number;step?:string;help?:string;emptyZero?:boolean;placeholder?:string;hideLabel?:boolean}) {
+  const display=(v:number|null)=>v===null||(emptyZero&&v===0)?'':String(v);
+  const [text,setText]=useState(()=>display(value));
   const focused=useRef(false);
-  useEffect(()=>{if(!focused.current)setText(value===null?'':String(value));},[value]);
-  return <label className="field"><span>{label}</span><div className="input-shell"><input type="number" inputMode="decimal" min={min} max={max} step={step} value={text} placeholder={nullable?'不限':'0'} onFocus={e=>{focused.current=true;e.currentTarget.select();}} onBlur={()=>{focused.current=false;setText(value===null?'':String(value));}} onChange={e=>{setText(e.target.value);const n=e.target.value===''?(nullable?null:0):Number(e.target.value);onChange(n);}}/><span>{suffix}</span></div>{help&&<small>{help}</small>}</label>;
+  useEffect(()=>{if(!focused.current&&Number.isFinite(value??0))setText(display(value));},[value,emptyZero]);
+  return <label className="field"><span className={hideLabel?'visually-hidden':undefined}>{label}</span><div className="input-shell"><input type="text" inputMode={step==='1'?'numeric':'decimal'} aria-invalid={value!==null&&!Number.isFinite(value)||undefined} value={text} placeholder={placeholder??(nullable?'不限':'0')} onFocus={e=>{focused.current=true;e.currentTarget.select();}} onBlur={()=>{focused.current=false;if(Number.isFinite(value??0))setText(display(value));}} onChange={e=>{setText(e.target.value);onChange(parseNumberInput(e.target.value,nullable));}}/><span>{suffix}</span></div>{help&&<small>{help}</small>}</label>;
 }
 export function Panel({title,description,action,children,className=''}:{title?:string;description?:string;action?:ReactNode;children:ReactNode;className?:string}) {return <section className={`panel ${className}`}>{title&&<div className="panel-heading"><div><h2>{title}</h2>{description&&<p>{description}</p>}</div>{action}</div>}{children}</section>;}
 export function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:ReactNode}) {
