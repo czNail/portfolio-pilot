@@ -2,47 +2,19 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {createFund,emptyPortfolio,demoPortfolio,validate,validateFund} from '../src/domain/model';
-import {normaliseTargets,parseNumberInput} from '../src/domain/input';
-import {envelope,parseBackup} from '../src/storage/backup';
-import {rebalance,stress} from '../src/domain/rebalance';
-import FundEditor from '../src/FundEditor';
-test('新基金只填名称就能保存；金额和全部高级设置采用默认值',()=>{
-  const p=emptyPortfolio(),f=createFund(p.categories[0].id);f.name='我的基金';
-  assert.deepEqual(validateFund(f,p.categories),[]);
-  assert.equal(f.value,0);assert.equal(f.minimum,0);assert.equal(f.step,1);assert.equal(f.weight,1);assert.equal(f.dailyLimit,null);assert.equal(f.monthlyLimit,null);
-  assert.ok(validateFund({...f,name:''},p.categories).length>0);
-});
-test('目标尚未填满100%不阻碍保存基金、备份与压力测试，买入计划仍严格校验',()=>{
-  const p=demoPortfolio();p.categories[0].target=10;
-  assert.deepEqual(validate(p,{requireTargets:false}),[]);
-  assert.ok(validate(p).length>0);
-  assert.deepEqual(validateFund(p.funds[0],p.categories),[]);
-  assert.deepEqual(parseBackup(JSON.stringify(envelope(p))).portfolio,p);
-  assert.ok(stress(p).total>0);assert.throws(()=>rebalance(p));
-});
-test('旧备份中已经设置的限购、最低额、步长和权重无损保留',()=>{
-  const p=demoPortfolio();assert.deepEqual(parseBackup(JSON.stringify(envelope(p))).portfolio,p);
-  assert.equal(p.funds[0].minimum,10);assert.equal(p.funds[0].step,10);assert.equal(p.funds[0].weight,2);
-});
-test('金额支持从页面粘贴分隔符、人民币符号；非法文本不会被误当成0',()=>{
-  assert.equal(parseNumberInput('￥ 12,345.67'),12345.67);
-  assert.equal(parseNumberInput('¥1，234.56'),1234.56);
-  assert.equal(parseNumberInput('  '),0);assert.equal(parseNumberInput('',true),null);
-  assert.equal(parseNumberInput('42%'),42);assert.equal(parseNumberInput('.5'),.5);
-  assert.ok(Number.isNaN(parseNumberInput('5abc')));assert.ok(Number.isNaN(parseNumberInput('1.2.3')));
-  assert.equal(parseNumberInput('-1'),-1); // 保留供金额规则显式拒绝，不静默改值。
-});
-test('按现有比例归一时精确合计100%，保留零权重，不修改原对象',()=>{
-  const p=emptyPortfolio();p.categories.forEach(c=>c.target=33.33);const old=structuredClone(p.categories);
-  const next=normaliseTargets(p.categories);assert.equal(next.reduce((s,c)=>s+Math.round(c.target*100),0),10000);assert.deepEqual(p.categories,old);
-  p.categories[0].target=0;assert.equal(normaliseTargets(p.categories)[0].target,0);
-  p.categories.forEach(c=>c.target=0);assert.throws(()=>normaliseTargets(p.categories));
-});
-test('添加表单仅名称必填，高级设置默认折叠，并提供连续添加',()=>{
-  const p=emptyPortfolio(),f=createFund('us');const html=renderToStaticMarkup(<FundEditor fund={f} p={p} editing={false} onClose={()=>{}} onSave={()=>{}}/>);
-  assert.equal((html.match(/\srequired=/g)||[]).length,1);
-  assert.match(html,/保存并继续添加/);assert.match(html,/限购与其他设置/);
-  assert.doesNotMatch(html,/<details[^>]*\sopen(?:[\s=>])/);
-  assert.doesNotMatch(html,/type="number"/);
-});
+import {demoPortfolio as oldDemo,emptyPortfolio as oldEmpty} from '../src/legacy/model';
+import {migrateLegacy} from '../src/domain/migrate';
+import {demoPortfolio,emptyPortfolio,totals,validate} from '../src/domain/model';
+import {stress} from '../src/domain/rebalance';
+import {STORAGE_KEY,LEGACY_KEY,envelope,parseBackup} from '../src/storage/backup';
+import {loadPortfolio} from '../src/storage/session';
+import {ShareSlider} from '../src/AllocationControls';
+const legacy=(p=oldDemo())=>JSON.stringify({app:'portfolio-pilot',schemaVersion:1,savedAt:'2026-10-20T00:00:00.000Z',portfolio:p});
+test('旧基金记录自动按类别汇总，债券与存款没有丢失',()=>{const old=oldDemo(),before=structuredClone(old),next=migrateLegacy(old);assert.deepEqual(old,before);assert.equal(next.assets.find(a=>a.id==='us')!.value,12000);assert.equal(next.assets.find(a=>a.id==='bonds')!.value,20000);assert.equal(next.reserve,100000);assert.equal(totals(next).total,152000);assert.deepEqual(validate(next),[]);assert.ok(Math.abs(stress(next).loss-19200)<1e-6);});
+test('旧版自定义债券类别会与原单列债券合并，保留加权损失',()=>{const old=oldDemo();old.categories.push({id:'custombond',name:'债券基金',target:0,shock:20});old.funds.push({...old.funds[0],id:'bond-fund',categoryId:'custombond',value:10000});const next=migrateLegacy(old);assert.equal(next.assets.find(a=>a.id==='bonds')!.value,30000);assert.ok(Math.abs(stress(next).loss-21200)<1e-6);assert.deepEqual(validate(next),[]);});
+test('未填完目标的旧草稿仍能迁移；空记录和只有债券也能迁移',()=>{const old=oldEmpty();old.categories.forEach(c=>c.target=0);assert.deepEqual(validate(migrateLegacy(old)),[]);old.bonds=10000;const next=migrateLegacy(old);assert.equal(next.assets.find(a=>a.id==='bonds')!.target,100);assert.deepEqual(validate(next),[]);});
+test('新旧备份都能恢复；未知版本、负金额、重复标识会拒绝',()=>{const p=demoPortfolio();assert.deepEqual(parseBackup(JSON.stringify(envelope(p))).portfolio,p);assert.equal(parseBackup(legacy()).migrated,true);const e=envelope(p);assert.throws(()=>parseBackup(JSON.stringify({...e,schemaVersion:8})));e.portfolio.assets[0].value=-1;assert.throws(()=>parseBackup(JSON.stringify(e)));e.portfolio.assets[0].value=1;e.portfolio.assets[1].id=e.portfolio.assets[0].id;assert.throws(()=>parseBackup(JSON.stringify(e)));assert.throws(()=>parseBackup(' '.repeat(1024*1024+1)));});
+test('读取旧数据只做内存汇总，旧版键保持原样；新版损坏时不回退覆盖',()=>{const raw=legacy(),map=new Map([[LEGACY_KEY,raw]]),storage={getItem:(k:string)=>map.get(k)??null};const boot=loadPortfolio(storage);assert.equal(boot.migrated,true);assert.equal(map.get(LEGACY_KEY),raw);assert.equal(map.has(STORAGE_KEY),false);map.set(STORAGE_KEY,'broken');const failed=loadPortfolio(storage);assert.equal(failed.blocked,true);assert.equal(failed.raw,'broken');assert.equal(map.get(LEGACY_KEY),raw);});
+test('滑条支持键盘和可直接编辑的百分比，没有必填字段',()=>{const html=renderToStaticMarkup(<ShareSlider name="美股" value={42} onChange={()=>{}}/>);assert.match(html,/type="range"/);assert.match(html,/aria-label="美股目标占比滑条"/);assert.doesNotMatch(html,/\srequired=/);});
+test('新版首页不出现基金录入、购买步长表单或证券名称要求',async()=>{Object.defineProperty(globalThis,'document',{configurable:true,value:{documentElement:{dataset:{theme:'light'}}}});Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=>null}});const {default:App}=await import('../src/App');const html=renderToStaticMarkup(<App/>);assert.match(html,/总额＋滑条/);assert.match(html,/希望配成什么比例/);assert.match(html,/下一笔钱怎么投/);assert.doesNotMatch(html,/添加基金|基金名称或代码|保存并继续添加/);assert.equal((html.match(/type="range"/g)||[]).length,6);assert.doesNotMatch(html,/\srequired=/);});
+test('最多八个旧自定义类别全部保留，旧目标为零时按现有资产衔接',()=>{const old=oldEmpty();old.categories=Array.from({length:8},(_,i)=>({id:`other-${i}`,name:`类别${i}`,target:0,shock:20}));old.funds=old.categories.map((c,i)=>({id:`fund-${i}`,name:`记录${i}`,categoryId:c.id,value:1000,dailyLimit:null,monthlyLimit:null,minimum:0,step:1,weight:1,paused:false}));old.bonds=2000;const next=migrateLegacy(old);assert.equal(totals(next).total,10000);assert.equal(next.assets.find(a=>a.id==='bonds')!.target,20);assert.deepEqual(validate(next),[]);assert.deepEqual(parseBackup(JSON.stringify(envelope(next))).portfolio,next);});
