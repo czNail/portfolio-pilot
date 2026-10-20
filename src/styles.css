@@ -17,3 +17,16 @@ input[type=range]::-moz-range-track{height:7px;background:transparent;border-rad
 .mobile-plan{display:none}.mobile-plan-row{padding:18px 0;border-bottom:1px solid var(--line)}.mobile-plan-row:last-child{border:0}.mobile-plan-row>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:15px}.mobile-plan-row strong{font-size:17px;font-weight:550;font-variant-numeric:tabular-nums}.mobile-plan-meta{display:flex;justify-content:space-between;gap:10px;font-size:10px;color:var(--muted);margin-top:9px;font-variant-numeric:tabular-nums}.mobile-plan-meta b{font-weight:500;color:var(--accent)}.mobile-plan-row>small{font-size:9px;color:var(--muted);display:block;margin-top:5px}
 @media(max-width:760px){.desktop-plan{display:none}.mobile-plan{display:block}}
 .summary-grid.two{grid-template-columns:1.15fr 1fr}@media(max-width:760px){.summary-grid.two{grid-template-columns:1fr 1fr}}
+
+/* Short, local guidance stays readable without interrupting the controls. */
+.quick-start{display:flex;align-items:baseline;gap:12px;padding:13px 17px;margin-bottom:22px;border-left:3px solid var(--accent);background:var(--accent-bg);border-radius:0 7px 7px 0;font-size:12px}
+.quick-start>strong{color:var(--accent);white-space:nowrap;font-weight:550}.quick-start p{margin:0;color:var(--text)}
+.usage-help{border:1px solid var(--line);border-radius:8px;background:var(--soft);margin:0 0 22px;font-size:12px;line-height:1.9;overflow-wrap:anywhere}
+.usage-help>summary{position:relative;padding:12px 15px;color:var(--accent);font-weight:500}
+.usage-help>summary>span{font-size:10px;color:var(--muted);font-weight:400;margin-left:12px}
+.usage-help[open]>summary>span{display:none}.usage-help[open]>summary{border-bottom:1px solid var(--line)}
+.usage-help-content{padding:14px 16px;color:var(--text)}.usage-help-content p{margin:0 0 12px}.usage-help-content p:last-child{margin-bottom:0}.usage-help-content strong{font-weight:550}
+.usage-help-content dl{margin:0}.usage-help-content dt{font-weight:550;margin-top:14px}.usage-help-content dt:first-child{margin-top:0}.usage-help-content dd{margin:4px 0 0;color:var(--muted)}
+.usage-help-content a{color:var(--accent);text-decoration:underline;text-underline-offset:3px}.usage-help-content .help-sources{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;margin-top:16px}.help-sources a{display:block;margin-top:5px}
+.contribution-panel>.usage-help{margin:20px 0 0}
+@media(max-width:760px){.quick-start{display:block;font-size:12px;padding:12px 14px;margin-bottom:18px}.quick-start>strong{display:block;margin-bottom:3px}.usage-help{font-size:12px;margin-bottom:20px}.usage-help>summary{padding:11px 12px}.usage-help-content{padding:12px 13px}.usage-help>summary>span{font-size:10px;margin-left:8px}}
