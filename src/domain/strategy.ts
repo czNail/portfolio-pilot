@@ -1,7 +1,6 @@
 import type { Asset, Portfolio } from "./model";
-import { normaliseWeights } from "./input";
 
-export const RULE_VERSION = "2026-10-v1";
+export const RULE_VERSION = "2026-10-v2";
 export type RiskLevel = "protect" | "steady" | "balanced" | "growth";
 export interface RiskProfile {
   horizon: "under1" | "1to3" | "3to7" | "over7";
@@ -20,50 +19,6 @@ export interface AllocationStrategy {
   relativeBand: number;
   custom: boolean;
 }
-export const LEVELS: Record<
-  RiskLevel,
-  {
-    label: string;
-    equity: number;
-    gold: number;
-    bonds: number;
-    cash: number;
-    description: string;
-  }
-> = {
-  protect: {
-    label: "流动性优先",
-    equity: 0,
-    gold: 0,
-    bonds: 0,
-    cash: 100,
-    description: "先保留近期要用的钱和生活安全垫。",
-  },
-  steady: {
-    label: "稳健型",
-    equity: 10,
-    gold: 5,
-    bonds: 20,
-    cash: 65,
-    description: "保留较高现金比例，以少量权益参与长期增长。",
-  },
-  balanced: {
-    label: "平衡型",
-    equity: 35,
-    gold: 10,
-    bonds: 30,
-    cash: 25,
-    description: "在权益增长与债券、现金缓冲之间取得平衡。",
-  },
-  growth: {
-    label: "成长型",
-    equity: 65,
-    gold: 10,
-    bonds: 20,
-    cash: 5,
-    description: "接受较大波动，主要为长期目标配置。",
-  },
-};
 export const riskChoices = {
   horizon: [
     ["under1", "1 年内", "近期就要用"],
@@ -99,74 +54,6 @@ export function validProfile(value: unknown): value is RiskProfile {
   return Object.entries(riskChoices).every(([key, choices]) =>
     choices.some((c) => c[0] === p[key as keyof RiskProfile]),
   );
-}
-export function recommend(profile: RiskProfile, assets: readonly Asset[]) {
-  if (!validProfile(profile)) throw new Error("请完成风险评估。");
-  const capacity = Math.min(
-    { under1: -1, "1to3": 0, "3to7": 1, over7: 2 }[profile.horizon],
-    { under3: -1, "3to6": 1, over6: 2 }[profile.reserve],
-  );
-  const willingness = Math.min(
-    { 10: 0, 20: 0, 35: 1, 50: 2 }[profile.loss],
-    { sell: 0, hold: 1, buy: 2 }[profile.reaction],
-  );
-  let level: RiskLevel =
-    (["steady", "balanced", "growth"] as const)[
-      Math.min(capacity, willingness)
-    ] ?? "protect";
-  const weights = (l: RiskLevel) => {
-    const t = LEVELS[l],
-      usShare =
-        profile.region === "us"
-          ? 2 / 3
-          : profile.region === "cn"
-            ? 1 / 3
-            : 1 / 2;
-    const values = assets.map((a) =>
-      a.id === "us"
-        ? t.equity * usShare
-        : a.id === "cn"
-          ? t.equity * (1 - usShare)
-          : a.id === "gold"
-            ? t.gold
-            : a.id === "bonds"
-              ? t.bonds
-              : a.id === "cash"
-                ? t.cash
-                : 0,
-    );
-    return normaliseWeights(values);
-  };
-  // A changed stress assumption may make a template unsuitable. Step down
-  // rather than implying that a questionnaire can guarantee a loss ceiling.
-  while (
-    level !== "protect" &&
-    scenarioRate(assets, weights(level)) > profile.loss
-  ) {
-    level =
-      level === "growth"
-        ? "balanced"
-        : level === "balanced"
-          ? "steady"
-          : "protect";
-  }
-  const reasons = [
-    profile.horizon === "under1"
-      ? "一年内要使用的资金优先保留流动性。"
-      : `投资期限为${riskChoices.horizon.find((x) => x[0] === profile.horizon)![1]}，限制了可采用的风险档位。`,
-    profile.reserve === "under3"
-      ? "备用金不足 3 个月，建议先补足安全垫。"
-      : `已有${riskChoices.reserve.find((x) => x[0] === profile.reserve)![1]}生活开支的备用金。`,
-    `结合可接受的 ${profile.loss}% 亏损和下跌时的行为，采用财务能力与心理意愿中更谨慎的一档。`,
-  ];
-  return {
-    level,
-    ...LEVELS[level],
-    weights: weights(level),
-    reasons,
-    capacity,
-    willingness,
-  };
 }
 export function scenarioRate(
   assets: readonly Asset[],

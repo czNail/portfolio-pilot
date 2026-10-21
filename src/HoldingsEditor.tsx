@@ -162,6 +162,9 @@ export default function HoldingsEditor({
             </div>
           </>
         )}
+        <p className="field-note">
+          这里只录入投资组合市值。“待投资余额”仅指准备买入但尚未成交的零钱；已预留的生活现金不要计入组合。
+        </p>
         <div className="snapshot-date">
           <label className="field">
             这些市值截至哪一天？
@@ -227,7 +230,18 @@ export default function HoldingsEditor({
                   disabled={a.value !== 0 || a.target !== 0}
                   onClick={() => {
                     const assets = draft.assets.filter((x) => x.id !== a.id);
-                    setDraft({ ...draft, assets });
+                    setDraft({
+                      ...draft,
+                      assets,
+                      monthlyPlan: draft.monthlyPlan
+                        ? {
+                            ...draft.monthlyPlan,
+                            assetIds: draft.monthlyPlan.assetIds.filter(
+                              (id) => id !== a.id,
+                            ),
+                          }
+                        : undefined,
+                    });
                     setMix(normaliseWeights(assets.map((x) => x.value)));
                   }}
                 >
@@ -238,6 +252,28 @@ export default function HoldingsEditor({
           <p className="field-note">
             新增或移除类别后，需要重新确认目标比例。类别市值和目标都为零时才可移除。
           </p>
+        </details>
+        <details className="inline-details">
+          <summary>
+            本月剩余可买额度<span>选填</span>
+          </summary>
+          <p className="field-note">
+            留空不限，0
+            表示本月暂停。用于检查固定计划和约束本次纠偏；记录执行后扣除，跨月请重新核对。
+          </p>
+          <div className="limit-grid">
+            {draft.assets
+              .filter((a) => a.id !== CASH_ID)
+              .map((a) => (
+                <NumberField
+                  key={a.id}
+                  label={`${a.name}剩余可买额度`}
+                  nullable
+                  value={a.monthlyLimit}
+                  onChange={(v) => update(a.id, { monthlyLimit: v })}
+                />
+              ))}
+          </div>
         </details>
         {(issues.length > 0 || note || !dateValid) && (
           <div className="notice warning" role="alert">

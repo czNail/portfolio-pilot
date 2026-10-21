@@ -17,6 +17,21 @@ const money = (v: unknown) =>
   Math.abs(v * 100 - Math.round(v * 100)) < 0.0001;
 export function readDetails(x: Record<string, unknown>): Partial<Portfolio> {
   const result: Partial<Portfolio> = {};
+  if (x.monthlyPlan !== undefined) {
+    const m = x.monthlyPlan;
+    if (
+      !object(m) ||
+      !money(m.budget) ||
+      !Array.isArray(m.assetIds) ||
+      m.assetIds.length > 16 ||
+      m.assetIds.some((id) => typeof id !== "string" || id.length > 200)
+    )
+      throw new Error("定投计划格式不正确。");
+    result.monthlyPlan = {
+      budget: m.budget as number,
+      assetIds: m.assetIds as string[],
+    };
+  }
   if (x.riskProfile !== undefined) {
     if (!validProfile(x.riskProfile)) throw new Error("风险评估格式不正确。");
     result.riskProfile = x.riskProfile;

@@ -40,27 +40,6 @@ export function contributionToTarget(p: Portfolio): number | null {
       .map((a) => a.value / (a.target / 100) - total),
   );
 }
-export function describePlan(p: Portfolio, plan: Plan) {
-  const before = deviation(p),
-    after = deviation(p, plan),
-    needed = contributionToTarget(p);
-  let title: string, detail: string;
-  if (!before.total) {
-    title = "从第一笔投入开始";
-    detail = "按已确认的目标比例分配，零头和受限金额留在组合现金。";
-  } else if (!before.breached) {
-    title = "当前配比在容忍范围内";
-    detail = "不必为了微小偏差频繁交易；本次仍优先补足低配资产。";
-  } else if (!after.breached) {
-    title = "这笔投入可把偏差拉回范围";
-    detail = "优先使用新资金，当前无需通过卖出恢复配比。";
-  } else {
-    title = "投入后仍有资产偏离目标";
-    detail =
-      "本次资金能补足部分低配资产，后续可继续投入，或查看含卖出的参考方案。";
-  }
-  return { before, after, needed, title, detail };
-}
 export function executePlan(
   p: Portfolio,
   expected: Plan,
@@ -132,4 +111,34 @@ export function fullRebalance(p: Portfolio, plan: Plan) {
         a.id !== CASH_ID && a.monthlyLimit !== null && change > a.monthlyLimit,
     };
   });
+}
+// Lower bound for a buy-only recovery: prices, fees, caps and rounding ignored.
+// The final value of each asset must stay above its current holding and within
+// the configured weight band. Binary search the smallest feasible total.
+export function additionalToBand(p: Portfolio) {
+  const d = deviation(p);
+  if (!d.breached) return 0;
+  const current = p.assets.map((a) => a.value),
+    total = d.total;
+  const possible = (value: number) => {
+    let minimum = 0;
+    for (let i = 0; i < current.length; i++) {
+      const row = d.rows[i],
+        lower = Math.max(0, p.assets[i].target - row.limit) / 100,
+        upper = Math.min(100, p.assets[i].target + row.limit) / 100;
+      if (current[i] > upper * value + 1e-7) return false;
+      minimum += Math.max(current[i], lower * value);
+    }
+    return minimum <= value + 1e-7;
+  };
+  let low = total,
+    high = Math.max(total, 1);
+  while (!possible(high) && high < 1e18) high *= 2;
+  if (!possible(high)) return null;
+  for (let i = 0; i < 70; i++) {
+    const mid = (low + high) / 2;
+    if (possible(mid)) high = mid;
+    else low = mid;
+  }
+  return Math.max(0, Math.ceil((high - total) * 100 - 1e-5) / 100);
 }

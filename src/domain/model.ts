@@ -1,3 +1,4 @@
+import type { MonthlyPlan } from "./monthly";
 import type { AllocationStrategy, RiskProfile } from "./strategy";
 
 export interface Asset {
@@ -22,7 +23,7 @@ export interface ExecutionRecord {
   keptCash: number;
 }
 export interface Portfolio {
-  version: 3;
+  version: 4;
   demo: boolean;
   budget: number;
   source: FundingSource;
@@ -30,6 +31,7 @@ export interface Portfolio {
   reserve: number;
   reserveShock: number;
   assets: Asset[];
+  monthlyPlan?: MonthlyPlan;
   strategy?: AllocationStrategy;
   riskProfile?: RiskProfile;
   snapshot?: Snapshot;
@@ -45,7 +47,7 @@ export function newId(prefix = "asset") {
 }
 export function emptyPortfolio(): Portfolio {
   return {
-    version: 3,
+    version: 4,
     demo: false,
     budget: 0,
     source: "external",
@@ -87,7 +89,7 @@ export function emptyPortfolio(): Portfolio {
       },
       {
         id: CASH_ID,
-        name: "现金 / 存款",
+        name: "待投资余额",
         value: 0,
         target: 100,
         shock: 0,
@@ -126,6 +128,19 @@ export function validate(
       issues.push(`${label}需为非负金额，最多两位小数。`);
   };
   money(p.budget, "本次预算", BUDGET_MAX);
+  if (p.monthlyPlan) {
+    money(p.monthlyPlan.budget, "每月定投预算", BUDGET_MAX);
+    if (p.monthlyPlan.budget <= 0) issues.push("每月定投预算需大于零。");
+    const ids = p.monthlyPlan.assetIds;
+    if (
+      !ids.length ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => id === CASH_ID || !p.assets.some((a) => a.id === id))
+    )
+      issues.push("请选择有效的定投类别，现金不参与定投比例。");
+    if (p.assets.some((a) => !ids.includes(a.id) && a.target > 0))
+      issues.push("未选择的类别目标比例需为零。");
+  }
   money(p.reserve, "备用金");
   if (!["external", "cash", "reserve"].includes(p.source))
     issues.push("投入来源无效。");

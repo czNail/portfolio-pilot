@@ -7,19 +7,13 @@ import {
   CASH_ID,
   type Portfolio,
 } from "./domain/model";
-import { rebalance, stress, type Plan } from "./domain/rebalance";
+import { rebalance, stress } from "./domain/rebalance";
 import {
   strategyConfirmed,
   confirmStrategy,
   type RiskProfile,
 } from "./domain/strategy";
-import {
-  describePlan,
-  deviation,
-  executePlan,
-  fullRebalance,
-  snapshotAge,
-} from "./domain/planning";
+import { executePlan, snapshotAge } from "./domain/planning";
 import { loadPortfolio } from "./storage/session";
 import {
   STORAGE_KEY,
@@ -28,20 +22,15 @@ import {
   parseBackup,
   downloadText,
 } from "./storage/backup";
-import {
-  Icon,
-  NumberField,
-  Panel,
-  Modal,
-  colors,
-  money,
-  pct,
-} from "./components";
-import { ShareSlider, PlanTable } from "./AllocationControls";
-import StrategyEditor, { AllocationMix } from "./StrategyEditor";
+import { Icon, Panel, Modal, colors, money, pct } from "./components";
+import { ShareSlider } from "./AllocationControls";
+import StrategyEditor from "./StrategyEditor";
 import HoldingsEditor from "./HoldingsEditor";
+import MonthlyDashboard from "./MonthlyDashboard";
+import RebalanceDashboard from "./RebalanceDashboard";
+import { monthlyReady } from "./domain/monthly";
 
-type Page = "plan" | "holdings" | "strategy" | "risk" | "backup";
+type Page = "monthly" | "plan" | "holdings" | "strategy" | "risk" | "backup";
 function boot() {
   try {
     return loadPortfolio(localStorage);
@@ -53,11 +42,10 @@ function boot() {
     });
   }
 }
-const shortPct = (n: number) => `${Number(n.toFixed(2))}%`;
 export default function App() {
   const [initial] = useState(boot),
     [p, setP] = useState(initial.p),
-    [page, setPage] = useState<Page>("plan");
+    [page, setPage] = useState<Page>("monthly");
   const [blocked, setBlocked] = useState(initial.blocked),
     [recovery, setRecovery] = useState(initial.raw),
     [notice, setNotice] = useState(initial.notice);
@@ -72,6 +60,7 @@ export default function App() {
   const [message, setMessage] = useState(""),
     [undo, setUndo] = useState<Portfolio | null>(null),
     [beforeDemo, setBeforeDemo] = useState<Portfolio | null>(null);
+  const [editorSetup, setEditorSetup] = useState(false);
   const [executing, setExecuting] = useState(false),
     [riskAfter, setRiskAfter] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null),
@@ -80,17 +69,13 @@ export default function App() {
   const signature = JSON.stringify(p),
     issues = validate(p),
     valid = issues.length === 0,
-    confirmed = strategyConfirmed(p),
     total = totals(p);
   const planIssues = validate(p, { forPlan: true });
   const plan = useMemo(() => {
-    if (!strategyConfirmed(p) || validate(p, { forPlan: true }).length)
-      return null;
+    if (!monthlyReady(p) || validate(p, { forPlan: true }).length) return null;
     return rebalance(p);
   }, [signature]);
-  const analysis = plan ? describePlan(p, plan) : null,
-    currentDeviation = deviation(p),
-    age = snapshotAge(p.snapshot?.asOf),
+  const age = snapshotAge(p.snapshot?.asOf),
     stale = total.invested > 0 && (age === null || age > 30);
   const risk = valid ? stress(p, riskAfter && plan ? plan : undefined) : null;
   const portfolioRisk = risk
@@ -184,7 +169,7 @@ export default function App() {
     setBlocked(false);
     setSaveError("");
     setNotice("");
-    go("plan");
+    go("monthly");
   };
   const importFile = async (f: File) => {
     try {
@@ -212,14 +197,21 @@ export default function App() {
       };
     setBeforeDemo(p);
     setP({
-      ...confirmStrategy(demo, [35, 20, 10, 30, 5], profile, "示例策略", true),
+      ...confirmStrategy(
+        demo,
+        [40, 35, 25, 0, 0],
+        profile,
+        "不含债券的示例",
+        true,
+      ),
+      monthlyPlan: { budget: 4000, assetIds: ["us", "cn", "gold"] },
       snapshot: {
         asOf: new Date().toISOString().slice(0, 10),
         estimated: true,
       },
     });
     setUndo(null);
-    go("plan");
+    go("monthly");
   };
   const finishExecution = () => {
     if (!plan || blocked || executionLock.current) return;
@@ -238,40 +230,19 @@ export default function App() {
       }, 0);
     }
   };
-  const exportPlan = () => {
-    if (!plan) return;
-    const quote = (s: string) =>
-      `"${(/^[\s]*[=+\-@]/.test(s) ? "'" : "") + s.replaceAll('"', '""')}"`;
-    const rows = [
-      [
-        "资产类别",
-        "当前市值",
-        "本次买入",
-        "计划后市值",
-        "计划后占比%",
-        "目标占比%",
-      ],
-      ...plan.rows.map((r) => [
-        p.assets.find((a) => a.id === r.id)!.name,
-        r.current.toFixed(2),
-        r.id === CASH_ID ? "现金余额见计划后市值" : r.buy.toFixed(2),
-        r.after.toFixed(2),
-        r.afterWeight.toFixed(2),
-        r.target.toFixed(2),
-      ]),
-    ];
-    downloadText(
-      "\uFEFF" + rows.map((row) => row.map(quote).join(",")).join("\r\n"),
-      "portfolio-plan.csv",
-      "text/csv;charset=utf-8",
-    );
-  };
   const pageTitles: Record<Page, [string, string]> = {
-    plan: ["下一笔钱，投得更有数", "确定长期目标，每次只处理眼前这笔投入。"],
+    monthly: [
+      "每月定投，照着计划执行",
+      "预算、类别和比例确认一次，清楚知道每个月各投多少。",
+    ],
+    plan: [
+      "再平衡，知道该怎样调整",
+      "对照目标找出超配与低配，选择用后续定投或买卖调回。",
+    ],
     holdings: ["更新我的持仓", "按资产大类记下市值，计划会据此重新计算。"],
     strategy: [
-      "找到适合自己的比例",
-      "结合资金期限与风险承受能力，确定一份长期目标。",
+      "制定每月定投计划",
+      "先确定预算与类别，再结合风险偏好确认比例和每月金额。",
     ],
     risk: ["看看组合能承受什么", "分别查看投资组合与包含备用金的全部资产。"],
     backup: [
@@ -291,7 +262,7 @@ export default function App() {
             href="/portfolio-pilot/"
             onClick={(e) => {
               e.preventDefault();
-              go("plan");
+              go("monthly");
             }}
           >
             <span className="logo-mark">
@@ -304,9 +275,9 @@ export default function App() {
           <nav aria-label="主要功能">
             {(
               [
-                ["plan", "投资计划"],
+                ["monthly", "定投计划"],
+                ["plan", "再平衡指导"],
                 ["holdings", "我的持仓"],
-                ["strategy", "长期策略"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -362,7 +333,7 @@ export default function App() {
             </h1>
             <p>{pageTitles[page][1]}</p>
           </div>
-          {page === "plan" && !p.demo && (
+          {page === "monthly" && !p.demo && (
             <button className="text-button" onClick={startDemo}>
               体验示例
               <Icon name="arrow" size={16} />
@@ -379,7 +350,7 @@ export default function App() {
                 setP(beforeDemo ?? emptyPortfolio());
                 setBeforeDemo(null);
                 setUndo(null);
-                go("plan");
+                go("monthly");
               }}
             >
               退出演示
@@ -418,13 +389,14 @@ export default function App() {
           <StrategyEditor
             key={p.strategy?.confirmedAt ?? "new"}
             p={p}
+            startAtSetup={editorSetup}
             onSave={(next) => {
               setP(next);
               setUndo(null);
-              go("plan");
-              setMessage("长期目标已确认，之后可直接计算投入计划。");
+              go("monthly");
+              setMessage("每月定投计划已确认；需要纠偏时查看再平衡指导。");
             }}
-            onCancel={() => go("plan")}
+            onCancel={() => go("monthly")}
           />
         )}
         {page === "holdings" && (
@@ -443,516 +415,78 @@ export default function App() {
             onCancel={() => go("plan")}
           />
         )}
+        {page === "monthly" && (
+          <MonthlyDashboard
+            p={p}
+            onEdit={(setup) => {
+              setEditorSetup(setup);
+              go("strategy");
+            }}
+            onRebalance={() => {
+              if (p.budget === 0 && p.monthlyPlan)
+                apply({ budget: p.monthlyPlan.budget });
+              go("plan");
+            }}
+            onHoldings={() => go("holdings")}
+          />
+        )}
         {page === "plan" && (
           <>
-            {!confirmed ? (
-              <section className="welcome-card panel">
-                <div className="welcome-copy">
-                  <span className="pill">
-                    {total.invested > 0
-                      ? "持仓已录入"
-                      : "第一次使用 · 约 1 分钟"}
-                  </span>
-                  <h2>
-                    先定好比例，
-                    <br />
-                    以后每笔投入都更简单。
-                  </h2>
-                  <p>
-                    回答 4 个问题，得到有依据的配置比例。
-                    <br />
-                    确认后，填入持仓和预算就能查看买入计划。
-                  </p>
-                  <button
-                    className="btn primary"
-                    onClick={() => go("strategy")}
-                  >
-                    确定我的长期策略
-                    <Icon name="arrow" size={18} />
-                  </button>
-                  <button
-                    className="text-button"
-                    onClick={() => go("holdings")}
-                  >
-                    {total.invested > 0 ? "先核对已有持仓" : "也可以先录入持仓"}
-                  </button>
-                </div>
-                <div className="welcome-steps">
-                  <div>
-                    <span>01</span>
+            {stale && (
+              <div className="notice warning">
+                <Icon name="info" />
+                <span>
+                  {age === null
+                    ? "持仓日期尚未确认，请核对市值后参考再平衡金额。"
+                    : `持仓已 ${age} 天未核对，计划可能与最新市值不同。`}
+                </span>
+                <button className="text-button" onClick={() => go("holdings")}>
+                  核对持仓
+                </button>
+              </div>
+            )}
+            {p.snapshot?.estimated && (
+              <p className="estimate-note">
+                <Icon name="info" size={15} />
+                当前为估算持仓，未包含最新净值、费用与实际成交差异。
+              </p>
+            )}
+            <RebalanceDashboard
+              p={p}
+              plan={plan}
+              issues={planIssues}
+              blocked={blocked}
+              onEdit={() => {
+                setEditorSetup(true);
+                go("strategy");
+              }}
+              onHoldings={() => go("holdings")}
+              onBudget={(budget) => apply({ budget, source: "external" })}
+              onExecute={() => {
+                executionLock.current = false;
+                setExecuting(true);
+              }}
+            />
+            {!!p.history?.length && (
+              <details className="panel execution-history">
+                <summary>
+                  <strong>最近再平衡执行记录</strong>
+                  <span>{p.history.length} 笔</span>
+                </summary>
+                {p.history.map((r) => (
+                  <div className="history-row" key={r.id}>
                     <div>
-                      <strong>了解自己的风险</strong>
-                      <p>资金何时要用，能承受多少亏损</p>
-                    </div>
-                  </div>
-                  <div>
-                    <span>02</span>
-                    <div>
-                      <strong>确认一份目标比例</strong>
-                      <p>有说明、能调整，长期沿用</p>
-                    </div>
-                  </div>
-                  <div>
-                    <span>03</span>
-                    <div>
-                      <strong>看清这次怎么买</strong>
-                      <p>优先补低配，也告诉你还差多少</p>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            ) : (
-              <>
-                <div className="dashboard-summary">
-                  <div className="portfolio-summary">
-                    <span>参与配置的组合</span>
-                    <strong>{money(total.invested)}</strong>
-                    <button
-                      className="text-button"
-                      onClick={() => go("holdings")}
-                    >
-                      <Icon name="edit" size={14} />
-                      更新持仓
-                    </button>
-                    <p>
-                      {p.snapshot
-                        ? `${p.snapshot.asOf} · ${p.snapshot.estimated ? "估算持仓" : "已核对市值"}`
-                        : total.invested > 0
-                          ? "尚未确认持仓日期"
-                          : "尚未录入持仓，可从第一笔投入开始"}
-                    </p>
-                  </div>
-                  <div className="deviation-summary">
-                    <span>最大目标偏差</span>
-                    <strong>
-                      {total.invested > 0
-                        ? `${currentDeviation.max.toFixed(1)}`
-                        : "—"}
-                      <small>{total.invested > 0 ? "个百分点" : ""}</small>
-                    </strong>
-                    <span
-                      className={`pill ${!currentDeviation.breached ? "good" : ""}`}
-                    >
-                      {total.invested <= 0
-                        ? "等待第一笔投入"
-                        : currentDeviation.breached
-                          ? "有资产超出容忍范围"
-                          : "在容忍范围内"}
-                    </span>
-                  </div>
-                  <div className="strategy-summary">
-                    <span>已确认的长期策略</span>
-                    <strong>{p.strategy!.label}</strong>
-                    <p>
-                      第 {p.strategy!.revision} 版 ·{" "}
-                      {p.strategy!.confirmedAt.slice(0, 10)}
-                    </p>
-                    <button
-                      className="text-button"
-                      onClick={() => go("strategy")}
-                    >
-                      查看或调整
-                      <Icon name="arrow" size={14} />
-                    </button>
-                  </div>
-                </div>
-                {stale && (
-                  <div className="notice warning">
-                    <Icon name="info" />
-                    <span>
-                      {age === null
-                        ? "持仓日期尚未确认，计划按已录入的金额计算。"
-                        : `持仓已超过 ${age} 天未核对，最新市值可能改变买入金额。`}
-                    </span>
-                    <button
-                      className="text-button"
-                      onClick={() => go("holdings")}
-                    >
-                      核对市值
-                    </button>
-                  </div>
-                )}
-                {p.snapshot?.estimated && total.invested > 0 && !stale && (
-                  <p className="estimate-note">
-                    <Icon name="info" size={15} />
-                    持仓为估算值，未包含净值变化、手续费或实际成交差异。
-                    <button
-                      className="text-button"
-                      onClick={() => go("holdings")}
-                    >
-                      按实际市值更新
-                    </button>
-                  </p>
-                )}
-                <div className="plan-layout">
-                  <Panel
-                    className="investment-panel"
-                    title="这次准备投入多少？"
-                    description="默认使用新增资金，优先补足低配资产。"
-                    action={<span className="pill">仅买入</span>}
-                  >
-                    <div className="budget-entry">
-                      <NumberField
-                        label="本次投入金额"
-                        hideLabel
-                        value={p.budget}
-                        emptyZero
-                        placeholder="输入本次预算"
-                        onChange={(v) => apply({ budget: v ?? 0 })}
-                      />
-                    </div>
-                    <div className="quick-budgets">
-                      {[1000, 4000, 10000].map((v) => (
-                        <button
-                          key={v}
-                          className={p.budget === v ? "selected" : ""}
-                          onClick={() => apply({ budget: v })}
-                        >
-                          {money(v).replace(".00", "")}
-                        </button>
-                      ))}
-                      <button onClick={() => apply({ budget: 0 })}>清零</button>
-                    </div>
-                    <details className="inline-details advanced-plan">
-                      <summary>
-                        资金来源与买入限制
-                        <span>
-                          {p.source === "external"
-                            ? "新增资金"
-                            : p.source === "cash"
-                              ? "组合现金"
-                              : "从备用金转入"}{" "}
-                          · {p.rounding} 元取整
-                        </span>
-                      </summary>
-                      <label className="field">
-                        本次资金来源
-                        <select
-                          value={p.source}
-                          onChange={(e) =>
-                            apply({
-                              source: e.target.value as Portfolio["source"],
-                            })
-                          }
-                        >
-                          <option value="external">外部新增资金</option>
-                          <option value="cash">使用组合现金</option>
-                          <option value="reserve">从备用金转入</option>
-                        </select>
-                      </label>
-                      <p className="field-note">
-                        {p.source === "external"
-                          ? "新增预算会计入组合总额。"
-                          : p.source === "cash"
-                            ? `从组合现金 ${money(p.assets.find((a) => a.id === CASH_ID)!.value)} 内安排，不增加总资产。`
-                            : `备用金尚有 ${money(p.reserve)}。转入后会减少生活安全垫，请确认仍足以应对开支。`}
+                      <strong>{r.executedAt.slice(0, 10)}</strong>
+                      <p>
+                        {r.buys
+                          .map((a) => `${a.name} ${money(a.amount)}`)
+                          .join(" · ") || "本次未安排买入"}
                       </p>
-                      <label className="field">
-                        买入金额取整
-                        <select
-                          value={p.rounding}
-                          onChange={(e) =>
-                            apply({
-                              rounding: Number(
-                                e.target.value,
-                              ) as Portfolio["rounding"],
-                            })
-                          }
-                        >
-                          {[1, 10, 100].map((v) => (
-                            <option key={v} value={v}>
-                              {v} 元一档
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <details className="inline-details">
-                        <summary>本月剩余可买额度</summary>
-                        <p className="field-note">
-                          留空即不限，0
-                          表示暂停。记录执行后扣除额度；跨月需要手动更新。
-                        </p>
-                        <div className="limit-grid">
-                          {p.assets
-                            .filter((a) => a.id !== CASH_ID)
-                            .map((a) => (
-                              <NumberField
-                                key={a.id}
-                                label={a.name}
-                                nullable
-                                value={a.monthlyLimit}
-                                onChange={(v) =>
-                                  apply({
-                                    assets: p.assets.map((x) =>
-                                      x.id === a.id
-                                        ? { ...x, monthlyLimit: v }
-                                        : x,
-                                    ),
-                                  })
-                                }
-                              />
-                            ))}
-                        </div>
-                      </details>
-                    </details>
-                    {planIssues.length > 0 && (
-                      <div className="notice warning" role="alert">
-                        {planIssues.join(" ")}
-                      </div>
-                    )}
-                    {plan && analysis && (
-                      <>
-                        <div
-                          className={`decision-note ${analysis.after.breached ? "attention" : ""}`}
-                        >
-                          <Icon
-                            name={analysis.after.breached ? "info" : "check"}
-                            size={20}
-                          />
-                          <div>
-                            <strong>{analysis.title}</strong>
-                            <p>{analysis.detail}</p>
-                          </div>
-                        </div>
-                        {p.budget > 0 ? (
-                          <>
-                            <div className="buy-list">
-                              <p className="list-caption">本次安排</p>
-                              {plan.rows
-                                .filter((r) => r.id !== CASH_ID && r.buy > 0)
-                                .map((r) => {
-                                  const i = p.assets.findIndex(
-                                      (a) => a.id === r.id,
-                                    ),
-                                    a = p.assets[i];
-                                  return (
-                                    <div className="buy-row" key={r.id}>
-                                      <div>
-                                        <span className="asset-name">
-                                          <i
-                                            style={{
-                                              background:
-                                                colors[i % colors.length],
-                                            }}
-                                          />
-                                          {a.name}
-                                        </span>
-                                        <small>
-                                          {r.beforeWeight < r.target
-                                            ? "补足低配"
-                                            : "按目标分配"}{" "}
-                                          · 计划后 {shortPct(r.afterWeight)}
-                                        </small>
-                                      </div>
-                                      <strong>+ {money(r.buy)}</strong>
-                                    </div>
-                                  );
-                                })}
-                              {plan.keptCash > 0 && (
-                                <div className="buy-row cash-row">
-                                  <div>
-                                    <span className="asset-name">
-                                      <i
-                                        style={{
-                                          background:
-                                            colors[
-                                              p.assets.findIndex(
-                                                (a) => a.id === CASH_ID,
-                                              ) % colors.length
-                                            ],
-                                        }}
-                                      />
-                                      {p.source === "cash"
-                                        ? "暂不动用的预算"
-                                        : "留在组合现金"}
-                                    </span>
-                                    <small>目标现金、限额或取整后的余额</small>
-                                  </div>
-                                  <strong>{money(plan.keptCash)}</strong>
-                                </div>
-                              )}
-                            </div>
-                            <div className="plan-outcome">
-                              <div>
-                                <span>最大偏差</span>
-                                <strong>
-                                  {total.invested > 0
-                                    ? `${plan.maxBefore.toFixed(1)} → `
-                                    : ""}
-                                  {plan.maxAfter.toFixed(1)}{" "}
-                                  <small>个百分点</small>
-                                </strong>
-                              </div>
-                              <div>
-                                <span>计划后组合</span>
-                                <strong>{money(plan.portfolioAfter)}</strong>
-                              </div>
-                            </div>
-                            <div className="plan-buttons">
-                              <button
-                                className="btn primary"
-                                disabled={blocked}
-                                onClick={() => {
-                                  executionLock.current = false;
-                                  setExecuting(true);
-                                }}
-                              >
-                                <Icon name="check" size={18} />
-                                记录已按计划执行
-                              </button>
-                              <button
-                                className="text-button"
-                                onClick={exportPlan}
-                              >
-                                <Icon name="download" size={16} />
-                                导出
-                              </button>
-                            </div>
-                            <p className="field-note">
-                              实际完成操作后再记录。工具提供计算，不会自动交易。
-                            </p>
-                          </>
-                        ) : (
-                          <div className="zero-budget">
-                            <Icon name="plan" size={29} />
-                            <strong>
-                              {p.history?.length
-                                ? "本次执行已记录，可以准备下一笔投入"
-                                : "输入预算，查看这次买什么"}
-                            </strong>
-                            <p>
-                              无需改动长期比例；仅想查看偏差时，可保持预算为 0。
-                            </p>
-                          </div>
-                        )}
-                        <details className="inline-details plan-detail">
-                          <summary>查看各类占比与计算细节</summary>
-                          <PlanTable p={p} plan={plan} />
-                          <p className="field-note">
-                            目标为零或已超配的类别不再买入。限额不足、现金目标和金额取整可能留下现金余额。
-                          </p>
-                        </details>
-                      </>
-                    )}
-                  </Panel>
-                  <aside className="plan-sidebar">
-                    <Panel
-                      title="我的目标比例"
-                      action={
-                        <button
-                          className="text-button"
-                          onClick={() => go("strategy")}
-                        >
-                          调整
-                        </button>
-                      }
-                    >
-                      <AllocationMix
-                        p={p}
-                        weights={p.assets.map((a) => a.target)}
-                      />
-                      <button
-                        className="sidebar-link"
-                        onClick={() => go("risk")}
-                      >
-                        <Icon name="risk" size={18} />
-                        <span>查看组合压力情景</span>
-                        <Icon name="arrow" size={15} />
-                      </button>
-                    </Panel>
-                    {analysis?.after.breached && (
-                      <Panel
-                        title="还需要再平衡吗？"
-                        className="rebalance-explanation"
-                      >
-                        <p>
-                          投入后仍有资产超过提醒阈值。可以继续用后续资金补低配。
-                        </p>
-                        {p.source === "external" && (
-                          <p className="field-note">
-                            {analysis.needed === null
-                              ? "持有目标为 0% 的类别，仅追加资金无法完全恢复目标比例。"
-                              : `若价格不变、不受限额及取整影响，从当前持仓出发至少需累计追加 ${money(analysis.needed)}，才可能精确达到目标。`}
-                          </p>
-                        )}
-                        <details className="inline-details sell-reference">
-                          <summary>查看含卖出的参考方案</summary>
-                          <p className="field-note">
-                            按本次预算后的总额换算至目标比例。未计交易费、税费、赎回限制和买入取整；仅供比较，不能直接记录为已执行。
-                          </p>
-                          <div className="reference-list">
-                            {plan &&
-                              fullRebalance(p, plan).map((r) => (
-                                <div key={r.id}>
-                                  <span>
-                                    {r.name}
-                                    <small>
-                                      {r.limited ? "超过本月剩余额度" : ""}
-                                    </small>
-                                  </span>
-                                  <strong
-                                    className={
-                                      r.id !== CASH_ID && r.change < 0
-                                        ? "danger"
-                                        : ""
-                                    }
-                                  >
-                                    {r.id === CASH_ID
-                                      ? `保留 ${money(r.after)}`
-                                      : r.change < 0
-                                        ? `卖出 ${money(-r.change)}`
-                                        : r.change > 0
-                                          ? `买入 ${money(r.change)}`
-                                          : "不调整"}
-                                  </strong>
-                                </div>
-                              ))}
-                          </div>
-                          <button
-                            className="text-button"
-                            onClick={() => go("holdings")}
-                          >
-                            实际买卖后，按市值更新持仓
-                          </button>
-                        </details>
-                      </Panel>
-                    )}
-                  </aside>
-                </div>
-                {!!p.history?.length && (
-                  <details className="panel execution-history">
-                    <summary>
-                      <strong>最近执行记录</strong>
-                      <span>{p.history.length} 笔 · 保留最近 20 笔</span>
-                    </summary>
-                    {p.history.map((r) => (
-                      <div className="history-row" key={r.id}>
-                        <div>
-                          <strong>{r.executedAt.slice(0, 10)}</strong>
-                          <p>
-                            {r.buys
-                              .map((a) => `${a.name} ${money(a.amount)}`)
-                              .join(" · ") || "本次全部保留现金"}
-                            {r.keptCash > 0
-                              ? ` · 预算余额 ${money(r.keptCash)}`
-                              : ""}
-                          </p>
-                        </div>
-                        <span>
-                          {money(r.budget)}
-                          <small>
-                            {r.source === "external"
-                              ? "新增资金"
-                              : r.source === "cash"
-                                ? "组合现金"
-                                : "备用金转入"}
-                          </small>
-                        </span>
-                      </div>
-                    ))}
-                  </details>
-                )}
-              </>
+                    </div>
+                    <span>{money(r.budget)}</span>
+                  </div>
+                ))}
+              </details>
             )}
           </>
         )}
@@ -975,7 +509,7 @@ export default function App() {
                 </button>
               </div>
               <button className="text-button" onClick={() => go("plan")}>
-                返回投资计划
+                返回再平衡指导
                 <Icon name="arrow" size={16} />
               </button>
             </div>
@@ -1152,7 +686,7 @@ export default function App() {
           onClose={() => setExecuting(false)}
         >
           <p className="body-copy">
-            确认后，按计划金额更新持仓并标记为估算值。本次预算会清零，剩余可买额度会扣除已买入金额。
+            确认后更新估算持仓并扣除剩余可买额度。本次再平衡金额会清零，每月固定定投预算保持不变。
           </p>
           <div className="execution-confirm-list">
             {plan.rows

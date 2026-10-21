@@ -1,17 +1,17 @@
 import { validate, type Portfolio } from "../domain/model";
 import { readDetails } from "./details";
-export const STORAGE_KEY = "portfolio-pilot:portfolio:v3";
+export const STORAGE_KEY = "portfolio-pilot:portfolio:v4";
 export const MAX_BACKUP_BYTES = 1024 * 1024;
 export interface Envelope {
   app: "portfolio-pilot";
-  schemaVersion: 3;
+  schemaVersion: 4;
   savedAt: string;
   portfolio: Portfolio;
 }
 export function envelope(p: Portfolio): Envelope {
   return {
     app: "portfolio-pilot",
-    schemaVersion: 3,
+    schemaVersion: 4,
     savedAt: new Date().toISOString(),
     portfolio: p,
   };
@@ -39,7 +39,7 @@ export function parseBackup(text: string): Envelope {
   if (!object(raw) || raw.app !== "portfolio-pilot")
     throw new Error("不是仓位助手的备份。");
   if (
-    raw.schemaVersion !== 3 ||
+    raw.schemaVersion !== 4 ||
     !object(raw.portfolio) ||
     typeof raw.savedAt !== "string" ||
     !Number.isFinite(Date.parse(raw.savedAt))
@@ -47,7 +47,7 @@ export function parseBackup(text: string): Envelope {
     throw new Error("请选择当前版本导出的备份。");
   const x = raw.portfolio;
   if (
-    x.version !== 3 ||
+    x.version !== 4 ||
     typeof x.demo !== "boolean" ||
     !Array.isArray(x.assets) ||
     x.assets.length > 16 ||
@@ -55,7 +55,7 @@ export function parseBackup(text: string): Envelope {
   )
     throw new Error("资产配置格式不正确。");
   const portfolio: Portfolio = {
-    version: 3,
+    version: 4,
     demo: x.demo,
     budget: number(x.budget),
     source: x.source as Portfolio["source"],
@@ -79,7 +79,7 @@ export function parseBackup(text: string): Envelope {
   if (issues.length) throw new Error(issues.join("\n"));
   return {
     app: "portfolio-pilot",
-    schemaVersion: 3,
+    schemaVersion: 4,
     savedAt: raw.savedAt,
     portfolio,
   };

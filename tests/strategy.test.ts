@@ -7,7 +7,6 @@ import {
   totals,
 } from "../src/domain/model";
 import {
-  recommend,
   scenarioRate,
   riskChoices,
   confirmStrategy,
@@ -24,6 +23,16 @@ import {
 import { rebalance } from "../src/domain/rebalance";
 import { envelope, parseBackup, STORAGE_KEY } from "../src/storage/backup";
 import { loadPortfolio } from "../src/storage/session";
+import { recommendSelected, mixWarnings } from "../src/domain/monthly";
+const recommend = (
+  profile: RiskProfile,
+  assets: ReturnType<typeof emptyPortfolio>["assets"],
+) =>
+  recommendSelected(
+    profile,
+    assets,
+    assets.filter((a) => a.id !== "cash").map((a) => a.id),
+  );
 const profile: RiskProfile = {
   horizon: "over7",
   reserve: "over6",
@@ -81,7 +90,11 @@ test("期限与安全垫限制主观风险意愿，区域偏好不提高权益�
   assert.ok(us.weights[0] > us.weights[1]);
   p.assets[0].shock = 100;
   p.assets[1].shock = 100;
-  assert.notEqual(recommend(profile, p.assets).level, "growth");
+  assert.ok(
+    mixWarnings(p.assets, recommend(profile, p.assets).weights, profile).some(
+      (w) => w.code === "loss" && w.critical,
+    ),
+  );
 });
 test("只有明确确认且目标一致时，才视为已制定策略", () => {
   const p = emptyPortfolio();
