@@ -1,48 +1,43 @@
+@import "../vendor/site-ui/tokens.css";
+@import "../vendor/site-ui/shell.css";
 :root {
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "PingFang SC",
-    "Microsoft YaHei",
-    sans-serif;
+  font-family: var(--site-font-sans);
   font-size: 15px;
   line-height: 1.65;
   font-synthesis: none;
   color-scheme: light;
-  --bg: #f5f7fa;
-  --surface: #fff;
-  --text: #243344;
-  --muted: #69788a;
-  --line: #e3e9ef;
-  --soft: #f3f6f9;
-  --accent: #086c9d;
-  --accent-bg: #eaf4f9;
-  --accent-text: #fff;
-  --good: #21745c;
-  --good-bg: #eaf5ef;
-  --warning: #91631a;
-  --warning-bg: #fff5e3;
-  --danger: #b54845;
-  --mono: "SFMono-Regular", Consolas, monospace;
+  --bg: var(--site-bg);
+  --surface: var(--site-surface);
+  --text: var(--site-text);
+  --muted: var(--site-muted);
+  --line: var(--site-border);
+  --soft: var(--site-soft);
+  --accent: var(--site-accent);
+  --accent-bg: var(--site-accent-soft);
+  --accent-text: var(--site-on-accent);
+  --good: var(--site-success);
+  --good-bg: var(--site-success-soft);
+  --warning: var(--site-warning);
+  --warning-bg: var(--site-warning-soft);
+  --danger: var(--site-danger);
+  --mono: var(--site-font-mono);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #131e2a;
-  --surface: #1c2a39;
-  --text: #e2eaf3;
-  --muted: #a2b1c3;
-  --line: #354558;
-  --soft: #243548;
-  --accent: #88cdee;
-  --accent-bg: #223f52;
-  --accent-text: #122330;
-  --good: #96d7bc;
-  --good-bg: #254037;
-  --warning: #efc880;
-  --warning-bg: #3a3022;
-  --danger: #f1a5a1;
+  --bg: var(--site-bg);
+  --surface: var(--site-surface);
+  --text: var(--site-text);
+  --muted: var(--site-muted);
+  --line: var(--site-border);
+  --soft: var(--site-soft);
+  --accent: var(--site-accent);
+  --accent-bg: var(--site-accent-soft);
+  --accent-text: var(--site-on-accent);
+  --good: var(--site-success);
+  --good-bg: var(--site-success-soft);
+  --warning: var(--site-warning);
+  --warning-bg: var(--site-warning-soft);
+  --danger: var(--site-danger);
 }
 * {
   box-sizing: border-box;
@@ -221,7 +216,7 @@ summary::marker {
   color: var(--muted);
   padding: 10px 17px;
   min-height: 44px;
-  border-radius: 8px;
+  border-radius: var(--site-radius-control);
   font-size: 14px;
   white-space: nowrap;
 }
@@ -1404,7 +1399,7 @@ input[type="range"]::-moz-range-thumb {
   display: inline-flex;
   border: 1px solid var(--line);
   background: var(--soft);
-  border-radius: 8px;
+  border-radius: var(--site-radius-control);
   padding: 3px;
   gap: 3px;
   flex-shrink: 0;
@@ -1854,7 +1849,7 @@ input[type="range"]::-moz-range-thumb {
   }
   .panel {
     padding: 22px 20px;
-    border-radius: 13px;
+    border-radius: var(--site-radius-card);
     margin-bottom: 19px;
   }
   .panel-heading {
@@ -1906,7 +1901,7 @@ input[type="range"]::-moz-range-thumb {
     grid-template-columns: 1fr 1fr;
     padding: 0;
     margin-bottom: 20px;
-    border-radius: 13px;
+    border-radius: var(--site-radius-card);
   }
   .dashboard-summary > div {
     padding: 20px;

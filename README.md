@@ -63,3 +63,13 @@ npm run build
 `src/domain/monthly.ts` 负责所选范围内的比例、风险提示与月投入；`strategy.ts` 负责问卷与确认；`planning.ts` 负责偏差、资金下界和执行；`rebalance.ts` 保持确定性的分币再平衡计算。定投与再平衡使用独立界面组件和预算状态。
 
 测试覆盖月预算守恒、类别排除、风险提示、资金下界、单次/月度预算隔离，以及从设置到固定定投、买卖指导、执行撤销的 DOM 流程。main 更新后，GitHub Actions 运行测试、类型检查和构建，再发布 GitHub Pages。
+
+
+## 共享站点样式
+
+配色、字体、钉子标志、全站导航、页脚与深浅色切换来自 [主页仓库的 site-ui](https://github.com/czNail/cznail.github.io/tree/main/packages/site-ui)。`vendor/site-ui` 是自动生成的副本，`site-ui.lock.json` 记录来源提交和 SHA-256 校验值。不要直接编辑副本。
+
+- 更新：`node scripts/sync-site-ui.mjs --update`；核验：`npm run check:site-ui`。
+- 构建和开发前自动核验副本并生成本站的主题脚本、图标；上线后不依赖跨站脚本加载。
+- 每日工作流检查上游更新，通过本项目构建后提出升级 PR；仓库需要允许 GitHub Actions 创建 PR。
+- 共享改版先在主页仓库运行四站桌面/手机、浅色/深色检查并审查截图；本项目保留自己的业务布局与数据格式。

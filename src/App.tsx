@@ -52,11 +52,6 @@ export default function App() {
   const [savedAt, setSavedAt] = useState(initial.savedAt),
     [saveError, setSaveError] = useState(""),
     [saving, setSaving] = useState(false);
-  const [theme, setTheme] = useState(() =>
-    typeof document === "undefined"
-      ? "light"
-      : document.documentElement.dataset.theme || "light",
-  );
   const [message, setMessage] = useState(""),
     [undo, setUndo] = useState<Portfolio | null>(null),
     [beforeDemo, setBeforeDemo] = useState<Portfolio | null>(null);
@@ -142,14 +137,6 @@ export default function App() {
   const apply = (patch: Partial<Portfolio>) => {
     setUndo(null);
     setP((prev) => ({ ...prev, ...patch }));
-  };
-  const toggleTheme = () => {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem("portfolio-pilot:theme", next);
-    } catch {}
   };
   const exportData = () => {
     if (!valid) {
@@ -307,13 +294,6 @@ export default function App() {
                         ? "已自动保存"
                         : "仅存于本机"}
             </span>
-            <button
-              className="icon-btn"
-              aria-label={theme === "light" ? "切换深色主题" : "切换浅色主题"}
-              onClick={toggleTheme}
-            >
-              <Icon name={theme === "light" ? "moon" : "sun"} />
-            </button>
             <button
               className={`icon-btn ${page === "backup" ? "active" : ""}`}
               aria-label="备份与恢复"
