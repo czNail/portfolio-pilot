@@ -1,21 +1,249 @@
-import {test} from 'node:test';
-import assert from 'node:assert/strict';
-import {emptyPortfolio,demoPortfolio,CASH_ID,cents,totals,validate,type Portfolio} from '../src/domain/model';
-import {rebalance,stress} from '../src/domain/rebalance';
-import {normaliseWeights,changeWeight,distributeUnits,parseNumberInput} from '../src/domain/input';
-const focused=(budget=4000):Portfolio=>{const p=emptyPortfolio();p.budget=budget;p.assets=p.assets.map(a=>({...a,target:a.id==='us'?100:0}));return p;};
-function invariant(p:Portfolio){const before=structuredClone(p),r=rebalance(p);assert.deepEqual(p,before);assert.equal(cents(r.bought)+cents(r.keptCash),cents(p.budget));assert.ok(r.bought>=0&&r.bought<=p.budget);assert.equal(cents(r.totalAfter),cents(totals(p).total)+(p.source==='external'?cents(p.budget):0));assert.equal(cents(r.rows.reduce((s,a)=>s+a.after,0)),cents(r.portfolioAfter));for(const a of p.assets){const row=r.rows.find(x=>x.id===a.id)!;assert.ok(row.after>=0);if(a.id!==CASH_ID){assert.equal(cents(row.buy)%cents(p.rounding),0);assert.equal(cents(row.after-row.current),cents(row.buy));if(row.buy>0)assert.ok(row.after<=r.portfolioAfter*a.target/100+1e-6);if(a.monthlyLimit!==null)assert.ok(row.buy<=a.monthlyLimit+1e-7);}}assert.ok(Math.abs(r.rows.reduce((s,a)=>s+a.afterWeight,0)-(r.portfolioAfter?100:0))<1e-7);const risk=stress(p,r);assert.ok(Math.abs(risk.rows.reduce((s,a)=>s+a.value,0)-risk.total)<1e-4);return r;}
-test('无需基金记录，空持仓按大类目标直接分配预算',()=>{const r=invariant(emptyPortfolio());assert.deepEqual(r.rows.map(a=>a.buy),[1680,1800,520,0,0]);assert.equal(r.keptCash,0);});
-test('现金目标会主动保留相应预算',()=>{const p=focused(10000);p.assets[0].target=60;p.assets.find(a=>a.id===CASH_ID)!.target=40;const r=invariant(p);assert.equal(r.bought,6000);assert.equal(r.keptCash,4000);assert.equal(r.rows.find(a=>a.id===CASH_ID)!.after,4000);});
-test('类别额度不足时剩余留在组合现金，安排后占比包含这笔现金',()=>{const p=focused();p.assets[0].monthlyLimit=1000;const r=invariant(p);assert.equal(r.bought,1000);assert.equal(r.keptCash,3000);assert.equal(r.rows[0].afterWeight,25);assert.equal(r.rows.find(a=>a.id===CASH_ID)!.afterWeight,75);});
-test('使用已有现金不重复增加总资产',()=>{const p=focused();p.source='cash';p.assets.find(a=>a.id===CASH_ID)!.value=10000;const r=invariant(p);assert.equal(r.totalAfter,10000);assert.equal(r.bought,4000);assert.equal(r.rows.find(a=>a.id===CASH_ID)!.after,6000);});
-test('从备用金转入不重复增加全部资产，未买入部分成为组合现金',()=>{const p=focused();p.source='reserve';p.reserve=5000;p.assets[0].monthlyLimit=1000;const r=invariant(p);assert.equal(r.reserveAfter,1000);assert.equal(r.totalAfter,5000);assert.equal(r.portfolioAfter,4000);assert.equal(r.rows.find(a=>a.id===CASH_ID)!.after,3000);});
-test('预算超过来源余额时不生成错误计划，但仍可保存配置草稿',()=>{const p=focused();p.source='cash';assert.deepEqual(validate(p),[]);assert.throws(()=>rebalance(p));p.source='reserve';assert.throws(()=>rebalance(p));});
-test('零预算、零资产与分币零头',()=>{const p=focused(0),r=invariant(p);assert.equal(r.bought,0);assert.equal(stress(p).rate,0);p.budget=4000.25;assert.equal(invariant(p).keptCash,.25);});
-test('压力测试按全部资产计算，包含现金和备用金',()=>{const p=focused(0);p.assets[0].value=10000;p.assets.find(a=>a.id===CASH_ID)!.value=5000;p.reserve=85000;const r=stress(p);assert.equal(r.total,100000);assert.equal(r.loss,6000);assert.equal(r.rate,6);});
-test('滑条联动始终精确合计100%，能激活零权重类别',()=>{let w=[42,45,13,0,0];w=changeWeight(w,3,20);assert.equal(w[3],20);assert.equal(w.reduce((s,a)=>s+Math.round(a*100),0),10000);w=changeWeight(w,0,100);assert.deepEqual(w,[100,0,0,0,0]);w=changeWeight(w,0,40);assert.equal(w[0],40);assert.equal(w.reduce((s,a)=>s+Math.round(a*100),0),10000);});
-test('按总额和比例换算市值时，金额守恒',()=>{const r=distributeUnits([33.33,33.33,33.34],10001);assert.equal(r.reduce((s,a)=>s+a,0),10001);assert.equal(normaliseWeights([0,0,0]).reduce((s,w)=>s+Math.round(w*100),0),10000);assert.equal(parseNumberInput('￥1,234.56'),1234.56);assert.ok(Number.isNaN(parseNumberInput('1a')));});
-let seed=8723;const random=(n:number)=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed%n;};
-test('500组配比、限额与资金来源组合，金额守恒且不超预算',()=>{for(let i=0;i<500;i++){const p=demoPortfolio();p.budget=random(1000)+.37;p.rounding=([1,10,100] as const)[random(3)];p.assets=p.assets.map(a=>({...a,value:random(10000),target:random(100),monthlyLimit:a.id===CASH_ID?null:random(2)?random(700):null}));const weights=normaliseWeights(p.assets.map(a=>a.target));p.assets=p.assets.map((a,j)=>({...a,target:weights[j]}));p.reserve=2000;p.source=(['external','cash','reserve'] as const)[random(3)];if(p.source==='cash')p.assets.find(a=>a.id===CASH_ID)!.value=2000;invariant(p);}});
-test('整数网格上的买入结果与小规模穷举的最小平方偏差一致',()=>{for(let n=0;n<100;n++){const p=focused(random(7));p.rounding=1;p.assets=p.assets.filter(a=>['us','cn',CASH_ID].includes(a.id)).map(a=>({...a,value:random(6),monthlyLimit:a.id===CASH_ID?null:random(6)}));const w=normaliseWeights([random(9),random(9),random(9)]);p.assets=p.assets.map((a,i)=>({...a,target:w[i]}));const r=invariant(p),total=totals(p).invested+p.budget,goals=p.assets.map(a=>total*a.target/100);let best=Infinity;for(let x=0;x<=Math.min(p.budget,p.assets[0].monthlyLimit!,Math.max(0,Math.floor(goals[0]-p.assets[0].value+1e-7)));x++)for(let y=0;y<=Math.min(p.budget-x,p.assets[1].monthlyLimit!,Math.max(0,Math.floor(goals[1]-p.assets[1].value+1e-7)));y++){const values=[p.assets[0].value+x,p.assets[1].value+y,p.assets[2].value+p.budget-x-y],score=values.reduce((s,v,i)=>s+(v-goals[i])**2,0);best=Math.min(best,score);}const score=r.rows.reduce((s,a,i)=>s+(a.after-goals[i])**2,0);assert.ok(Math.abs(score-best)<1e-6,`${score} vs ${best}`);}});
-test('最大预算和最小金额步长可以完成',()=>{const p=focused(1_000_000);p.rounding=1;assert.equal(invariant(p).bought,1_000_000);});
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  emptyPortfolio,
+  demoPortfolio,
+  CASH_ID,
+  cents,
+  totals,
+  validate,
+  type Portfolio,
+} from "../src/domain/model";
+import { rebalance, stress } from "../src/domain/rebalance";
+import {
+  normaliseWeights,
+  changeWeight,
+  distributeUnits,
+  parseNumberInput,
+} from "../src/domain/input";
+const focused = (budget = 4000): Portfolio => {
+  const p = emptyPortfolio();
+  p.budget = budget;
+  p.assets = p.assets.map((a) => ({ ...a, target: a.id === "us" ? 100 : 0 }));
+  return p;
+};
+function invariant(p: Portfolio) {
+  const before = structuredClone(p),
+    r = rebalance(p);
+  assert.deepEqual(p, before);
+  assert.equal(cents(r.bought) + cents(r.keptCash), cents(p.budget));
+  assert.ok(r.bought >= 0 && r.bought <= p.budget);
+  assert.equal(
+    cents(r.totalAfter),
+    cents(totals(p).total) + (p.source === "external" ? cents(p.budget) : 0),
+  );
+  assert.equal(
+    cents(r.rows.reduce((s, a) => s + a.after, 0)),
+    cents(r.portfolioAfter),
+  );
+  for (const a of p.assets) {
+    const row = r.rows.find((x) => x.id === a.id)!;
+    assert.ok(row.after >= 0);
+    if (a.id !== CASH_ID) {
+      assert.equal(cents(row.buy) % cents(p.rounding), 0);
+      assert.equal(cents(row.after - row.current), cents(row.buy));
+      if (row.buy > 0)
+        assert.ok(row.after <= (r.portfolioAfter * a.target) / 100 + 1e-6);
+      if (a.monthlyLimit !== null) assert.ok(row.buy <= a.monthlyLimit + 1e-7);
+    }
+  }
+  assert.ok(
+    Math.abs(
+      r.rows.reduce((s, a) => s + a.afterWeight, 0) -
+        (r.portfolioAfter ? 100 : 0),
+    ) < 1e-7,
+  );
+  const risk = stress(p, r);
+  assert.ok(
+    Math.abs(risk.rows.reduce((s, a) => s + a.value, 0) - risk.total) < 1e-4,
+  );
+  return r;
+}
+test("初始没有预算；明确输入目标后按大类分配", () => {
+  const empty = emptyPortfolio();
+  assert.equal(invariant(empty).bought, 0);
+  empty.budget = 4000;
+  empty.assets = empty.assets.map((a, i) => ({
+    ...a,
+    target: [42, 45, 13, 0, 0][i],
+  }));
+  const r = invariant(empty);
+  assert.deepEqual(
+    r.rows.map((a) => a.buy),
+    [1680, 1800, 520, 0, 0],
+  );
+  assert.equal(r.keptCash, 0);
+});
+test("现金目标会主动保留相应预算", () => {
+  const p = focused(10000);
+  p.assets[0].target = 60;
+  p.assets.find((a) => a.id === CASH_ID)!.target = 40;
+  const r = invariant(p);
+  assert.equal(r.bought, 6000);
+  assert.equal(r.keptCash, 4000);
+  assert.equal(r.rows.find((a) => a.id === CASH_ID)!.after, 4000);
+});
+test("类别额度不足时剩余留在组合现金，安排后占比包含这笔现金", () => {
+  const p = focused();
+  p.assets[0].monthlyLimit = 1000;
+  const r = invariant(p);
+  assert.equal(r.bought, 1000);
+  assert.equal(r.keptCash, 3000);
+  assert.equal(r.rows[0].afterWeight, 25);
+  assert.equal(r.rows.find((a) => a.id === CASH_ID)!.afterWeight, 75);
+});
+test("使用已有现金不重复增加总资产", () => {
+  const p = focused();
+  p.source = "cash";
+  p.assets.find((a) => a.id === CASH_ID)!.value = 10000;
+  const r = invariant(p);
+  assert.equal(r.totalAfter, 10000);
+  assert.equal(r.bought, 4000);
+  assert.equal(r.rows.find((a) => a.id === CASH_ID)!.after, 6000);
+});
+test("从备用金转入不重复增加全部资产，未买入部分成为组合现金", () => {
+  const p = focused();
+  p.source = "reserve";
+  p.reserve = 5000;
+  p.assets[0].monthlyLimit = 1000;
+  const r = invariant(p);
+  assert.equal(r.reserveAfter, 1000);
+  assert.equal(r.totalAfter, 5000);
+  assert.equal(r.portfolioAfter, 4000);
+  assert.equal(r.rows.find((a) => a.id === CASH_ID)!.after, 3000);
+});
+test("预算超过来源余额时不生成错误计划，但仍可保存配置草稿", () => {
+  const p = focused();
+  p.source = "cash";
+  assert.deepEqual(validate(p), []);
+  assert.throws(() => rebalance(p));
+  p.source = "reserve";
+  assert.throws(() => rebalance(p));
+});
+test("零预算、零资产与分币零头", () => {
+  const p = focused(0),
+    r = invariant(p);
+  assert.equal(r.bought, 0);
+  assert.equal(stress(p).rate, 0);
+  p.budget = 4000.25;
+  assert.equal(invariant(p).keptCash, 0.25);
+});
+test("压力测试按全部资产计算，包含现金和备用金", () => {
+  const p = focused(0);
+  p.assets[0].value = 10000;
+  p.assets.find((a) => a.id === CASH_ID)!.value = 5000;
+  p.reserve = 85000;
+  const r = stress(p);
+  assert.equal(r.total, 100000);
+  assert.equal(r.loss, 6000);
+  assert.equal(r.rate, 6);
+});
+test("滑条联动始终精确合计100%，能激活零权重类别", () => {
+  let w = [42, 45, 13, 0, 0];
+  w = changeWeight(w, 3, 20);
+  assert.equal(w[3], 20);
+  assert.equal(
+    w.reduce((s, a) => s + Math.round(a * 100), 0),
+    10000,
+  );
+  w = changeWeight(w, 0, 100);
+  assert.deepEqual(w, [100, 0, 0, 0, 0]);
+  w = changeWeight(w, 0, 40);
+  assert.equal(w[0], 40);
+  assert.equal(
+    w.reduce((s, a) => s + Math.round(a * 100), 0),
+    10000,
+  );
+});
+test("按总额和比例换算市值时，金额守恒", () => {
+  const r = distributeUnits([33.33, 33.33, 33.34], 10001);
+  assert.equal(
+    r.reduce((s, a) => s + a, 0),
+    10001,
+  );
+  assert.equal(
+    normaliseWeights([0, 0, 0]).reduce((s, w) => s + Math.round(w * 100), 0),
+    10000,
+  );
+  assert.equal(parseNumberInput("￥1,234.56"), 1234.56);
+  assert.ok(Number.isNaN(parseNumberInput("1a")));
+});
+let seed = 8723;
+const random = (n: number) => {
+  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  return seed % n;
+};
+test("500组配比、限额与资金来源组合，金额守恒且不超预算", () => {
+  for (let i = 0; i < 500; i++) {
+    const p = demoPortfolio();
+    p.budget = random(1000) + 0.37;
+    p.rounding = ([1, 10, 100] as const)[random(3)];
+    p.assets = p.assets.map((a) => ({
+      ...a,
+      value: random(10000),
+      target: random(100),
+      monthlyLimit: a.id === CASH_ID ? null : random(2) ? random(700) : null,
+    }));
+    const weights = normaliseWeights(p.assets.map((a) => a.target));
+    p.assets = p.assets.map((a, j) => ({ ...a, target: weights[j] }));
+    p.reserve = 2000;
+    p.source = (["external", "cash", "reserve"] as const)[random(3)];
+    if (p.source === "cash")
+      p.assets.find((a) => a.id === CASH_ID)!.value = 2000;
+    invariant(p);
+  }
+});
+test("整数网格上的买入结果与小规模穷举的最小平方偏差一致", () => {
+  for (let n = 0; n < 100; n++) {
+    const p = focused(random(7));
+    p.rounding = 1;
+    p.assets = p.assets
+      .filter((a) => ["us", "cn", CASH_ID].includes(a.id))
+      .map((a) => ({
+        ...a,
+        value: random(6),
+        monthlyLimit: a.id === CASH_ID ? null : random(6),
+      }));
+    const w = normaliseWeights([random(9), random(9), random(9)]);
+    p.assets = p.assets.map((a, i) => ({ ...a, target: w[i] }));
+    const r = invariant(p),
+      total = totals(p).invested + p.budget,
+      goals = p.assets.map((a) => (total * a.target) / 100);
+    let best = Infinity;
+    for (
+      let x = 0;
+      x <=
+      Math.min(
+        p.budget,
+        p.assets[0].monthlyLimit!,
+        Math.max(0, Math.floor(goals[0] - p.assets[0].value + 1e-7)),
+      );
+      x++
+    )
+      for (
+        let y = 0;
+        y <=
+        Math.min(
+          p.budget - x,
+          p.assets[1].monthlyLimit!,
+          Math.max(0, Math.floor(goals[1] - p.assets[1].value + 1e-7)),
+        );
+        y++
+      ) {
+        const values = [
+            p.assets[0].value + x,
+            p.assets[1].value + y,
+            p.assets[2].value + p.budget - x - y,
+          ],
+          score = values.reduce((s, v, i) => s + (v - goals[i]) ** 2, 0);
+        best = Math.min(best, score);
+      }
+    const score = r.rows.reduce((s, a, i) => s + (a.after - goals[i]) ** 2, 0);
+    assert.ok(Math.abs(score - best) < 1e-6, `${score} vs ${best}`);
+  }
+});
+test("最大预算和最小金额步长可以完成", () => {
+  const p = focused(1_000_000);
+  p.rounding = 1;
+  assert.equal(invariant(p).bought, 1_000_000);
+});

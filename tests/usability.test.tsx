@@ -1,20 +1,164 @@
-import {test} from 'node:test';
-import assert from 'node:assert/strict';
-import React from 'react';
-import {renderToStaticMarkup} from 'react-dom/server';
-import {demoPortfolio as oldDemo,emptyPortfolio as oldEmpty} from '../src/legacy/model';
-import {migrateLegacy} from '../src/domain/migrate';
-import {demoPortfolio,emptyPortfolio,totals,validate} from '../src/domain/model';
-import {stress} from '../src/domain/rebalance';
-import {STORAGE_KEY,LEGACY_KEY,envelope,parseBackup} from '../src/storage/backup';
-import {loadPortfolio} from '../src/storage/session';
-import {ShareSlider} from '../src/AllocationControls';
-const legacy=(p=oldDemo())=>JSON.stringify({app:'portfolio-pilot',schemaVersion:1,savedAt:'2026-10-20T00:00:00.000Z',portfolio:p});
-test('旧基金记录自动按类别汇总，债券与存款没有丢失',()=>{const old=oldDemo(),before=structuredClone(old),next=migrateLegacy(old);assert.deepEqual(old,before);assert.equal(next.assets.find(a=>a.id==='us')!.value,12000);assert.equal(next.assets.find(a=>a.id==='bonds')!.value,20000);assert.equal(next.reserve,100000);assert.equal(totals(next).total,152000);assert.deepEqual(validate(next),[]);assert.ok(Math.abs(stress(next).loss-19200)<1e-6);});
-test('旧版自定义债券类别会与原单列债券合并，保留加权损失',()=>{const old=oldDemo();old.categories.push({id:'custombond',name:'债券基金',target:0,shock:20});old.funds.push({...old.funds[0],id:'bond-fund',categoryId:'custombond',value:10000});const next=migrateLegacy(old);assert.equal(next.assets.find(a=>a.id==='bonds')!.value,30000);assert.ok(Math.abs(stress(next).loss-21200)<1e-6);assert.deepEqual(validate(next),[]);});
-test('未填完目标的旧草稿仍能迁移；空记录和只有债券也能迁移',()=>{const old=oldEmpty();old.categories.forEach(c=>c.target=0);assert.deepEqual(validate(migrateLegacy(old)),[]);old.bonds=10000;const next=migrateLegacy(old);assert.equal(next.assets.find(a=>a.id==='bonds')!.target,100);assert.deepEqual(validate(next),[]);});
-test('新旧备份都能恢复；未知版本、负金额、重复标识会拒绝',()=>{const p=demoPortfolio();assert.deepEqual(parseBackup(JSON.stringify(envelope(p))).portfolio,p);assert.equal(parseBackup(legacy()).migrated,true);const e=envelope(p);assert.throws(()=>parseBackup(JSON.stringify({...e,schemaVersion:8})));e.portfolio.assets[0].value=-1;assert.throws(()=>parseBackup(JSON.stringify(e)));e.portfolio.assets[0].value=1;e.portfolio.assets[1].id=e.portfolio.assets[0].id;assert.throws(()=>parseBackup(JSON.stringify(e)));assert.throws(()=>parseBackup(' '.repeat(1024*1024+1)));});
-test('读取旧数据只做内存汇总，旧版键保持原样；新版损坏时不回退覆盖',()=>{const raw=legacy(),map=new Map([[LEGACY_KEY,raw]]),storage={getItem:(k:string)=>map.get(k)??null};const boot=loadPortfolio(storage);assert.equal(boot.migrated,true);assert.equal(map.get(LEGACY_KEY),raw);assert.equal(map.has(STORAGE_KEY),false);map.set(STORAGE_KEY,'broken');const failed=loadPortfolio(storage);assert.equal(failed.blocked,true);assert.equal(failed.raw,'broken');assert.equal(map.get(LEGACY_KEY),raw);});
-test('滑条支持键盘和可直接编辑的百分比，没有必填字段',()=>{const html=renderToStaticMarkup(<ShareSlider name="美股" value={42} onChange={()=>{}}/>);assert.match(html,/type="range"/);assert.match(html,/aria-label="美股目标占比滑条"/);assert.doesNotMatch(html,/\srequired=/);});
-test('新版首页不出现基金录入、购买步长表单或证券名称要求',async()=>{Object.defineProperty(globalThis,'document',{configurable:true,value:{documentElement:{dataset:{theme:'light'}}}});Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=>null}});const {default:App}=await import('../src/App');const html=renderToStaticMarkup(<App/>);assert.match(html,/总额＋滑条/);assert.match(html,/希望配成什么比例/);assert.match(html,/下一笔钱怎么投/);assert.doesNotMatch(html,/添加基金|基金名称或代码|保存并继续添加/);assert.equal((html.match(/type="range"/g)||[]).length,6);assert.doesNotMatch(html,/\srequired=/);});
-test('最多八个旧自定义类别全部保留，旧目标为零时按现有资产衔接',()=>{const old=oldEmpty();old.categories=Array.from({length:8},(_,i)=>({id:`other-${i}`,name:`类别${i}`,target:0,shock:20}));old.funds=old.categories.map((c,i)=>({id:`fund-${i}`,name:`记录${i}`,categoryId:c.id,value:1000,dailyLimit:null,monthlyLimit:null,minimum:0,step:1,weight:1,paused:false}));old.bonds=2000;const next=migrateLegacy(old);assert.equal(totals(next).total,10000);assert.equal(next.assets.find(a=>a.id==='bonds')!.target,20);assert.deepEqual(validate(next),[]);assert.deepEqual(parseBackup(JSON.stringify(envelope(next))).portfolio,next);});
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import React, { act } from "react";
+import { JSDOM } from "jsdom";
+import { STORAGE_KEY, parseBackup } from "../src/storage/backup";
+
+test("首次评估、更新持仓、自动计划、执行与撤销，以及隔离演示数据", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="root"></div></body></html>',
+    { url: "https://cznail.github.io/portfolio-pilot/" },
+  );
+  for (const key of [
+    "window",
+    "document",
+    "localStorage",
+    "HTMLElement",
+    "HTMLInputElement",
+    "HTMLDialogElement",
+    "Event",
+    "MouseEvent",
+  ])
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      value: (dom.window as any)[key],
+    });
+  Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+    configurable: true,
+    value: true,
+  });
+  dom.window.scrollTo = () => {};
+  dom.window.HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  dom.window.HTMLDialogElement.prototype.close = function () {
+    this.open = false;
+  };
+  const { createRoot } = await import("react-dom/client"),
+    { default: App } = await import("../src/App");
+  const container = dom.window.document.getElementById("root")!,
+    root = createRoot(container);
+  const flush = async () => {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
+    });
+  };
+  const button = (label: string) => {
+    const el = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === label,
+    );
+    assert.ok(el, `缺少按钮 ${label}`);
+    return el;
+  };
+  const click = async (label: string) => {
+    await act(async () => {
+      button(label).click();
+    });
+  };
+  const choice = async (name: string, index: number) => {
+    await act(async () => {
+      container
+        .querySelectorAll<HTMLInputElement>(`input[name="${name}"]`)
+        [index].click();
+    });
+  };
+  const input = async (label: string, value: string) => {
+    const el = [...container.querySelectorAll("label")]
+      .find((l) => l.textContent?.startsWith(label))
+      ?.querySelector("input");
+    assert.ok(el, label);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        dom.window.HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(el, value);
+      el.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+  };
+  try {
+    await act(async () => {
+      root.render(<App />);
+    });
+    assert.match(container.textContent!, /先定好比例/);
+    assert.doesNotMatch(container.textContent!, /本次安排|记录已按计划执行/);
+    await click("确定我的长期策略");
+    assert.equal(button("下一步").disabled, true);
+    await choice("horizon", 3);
+    await click("下一步");
+    await choice("reserve", 2);
+    await click("下一步");
+    await choice("loss", 2);
+    await click("下一步");
+    await choice("reaction", 1);
+    await click("查看建议比例");
+    assert.match(container.textContent!, /建议采用平衡型/);
+    assert.doesNotMatch(container.textContent!, /记录已按计划执行/);
+    await click("确认并使用策略");
+    await flush();
+    assert.ok(
+      parseBackup(localStorage.getItem(STORAGE_KEY)!).portfolio.strategy,
+    );
+    assert.match(container.textContent!, /输入预算，查看这次买什么/);
+    await click("我的持仓");
+    await input("美股当前总市值", "50000");
+    await input("A 股当前总市值", "15000");
+    await input("黄金当前总市值", "10000");
+    await input("债券当前总市值", "25000");
+    await click("保存持仓");
+    await click("¥4,000");
+    assert.ok(container.querySelectorAll(".buy-row").length > 0);
+    assert.match(container.textContent!, /投入后仍有资产偏离目标/);
+    await click("记录已按计划执行");
+    assert.ok(container.querySelector("dialog")?.open);
+    await click("确认，更新估算持仓");
+    await flush();
+    const executed = parseBackup(localStorage.getItem(STORAGE_KEY)!).portfolio;
+    assert.equal(executed.budget, 0);
+    assert.equal(executed.history!.length, 1);
+    assert.equal(executed.snapshot!.estimated, true);
+    assert.match(container.textContent!, /本次执行已记录/);
+    await click("撤销");
+    await flush();
+    const reverted = parseBackup(localStorage.getItem(STORAGE_KEY)!).portfolio;
+    assert.equal(reverted.budget, 4000);
+    assert.equal(reverted.history, undefined);
+    const saved = localStorage.getItem(STORAGE_KEY);
+    await click("体验示例");
+    await flush();
+    assert.equal(localStorage.getItem(STORAGE_KEY), saved);
+    assert.match(container.textContent!, /正在体验虚构示例/);
+    await click("退出演示");
+    assert.match(container.textContent!, /已核对市值/);
+    await click("长期策略");
+    await click("微调目标比例");
+    await click("暂不修改");
+    await flush();
+    assert.equal(
+      parseBackup(localStorage.getItem(STORAGE_KEY)!).portfolio.strategy!
+        .revision,
+      1,
+    );
+    await input("本次投入金额", "abc");
+    assert.match(container.textContent!, /本次预算需为非负金额/);
+    assert.equal(
+      [...container.querySelectorAll("button")].some(
+        (b) => b.textContent === "记录已按计划执行",
+      ),
+      false,
+    );
+    await input("本次投入金额", "4000");
+    await click("压力测算");
+    await input("美股假设跌幅", "abc");
+    assert.match(container.textContent!, /美股假设跌幅需为/);
+    assert.ok(
+      [...container.querySelectorAll("label")].some((l) =>
+        l.textContent?.startsWith("美股假设跌幅"),
+      ),
+    );
+    await input("美股假设跌幅", "60");
+    assert.match(container.textContent!, /投资组合的情景损失/);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+  }
+});
