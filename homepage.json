@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "仓位助手",
+  "label": "资产配置",
+  "description": "把资产比例、定投与再平衡放在一起，做一个自己用得顺手的仓位工具。",
+  "tags": [
+    "TypeScript",
+    "资产配置"
+  ],
+  "icon": "./assets/homepage-icon.svg",
+  "tool": {
+    "url": "https://cznail.github.io/portfolio-pilot/",
+    "subtitle": "Portfolio Pilot · 资产配置与再平衡",
+    "features": [
+      "大类仓位",
+      "定投规划",
+      "只买入再平衡",
+      "情景压力测试"
+    ],
+    "status": "available"
+  }
+}
