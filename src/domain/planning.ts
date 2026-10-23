@@ -97,16 +97,37 @@ export function fullRebalance(p: Portfolio, plan: Plan) {
     p.assets.map((a) => a.target),
     cents(plan.portfolioAfter),
   );
-  return p.assets.map((a, i) => {
-    const current =
+  const step = cents(p.rounding);
+  const cash = p.assets.findIndex((a) => a.id === CASH_ID);
+  const current = p.assets.map(
+    (a) =>
       cents(a.value) +
-      (a.id === CASH_ID && p.source !== "cash" ? cents(p.budget) : 0);
-    const change = yuan(desired[i] - current);
+      (a.id === CASH_ID && p.source !== "cash" ? cents(p.budget) : 0),
+  );
+  const changes = desired.map((v, i) =>
+    i === cash
+      ? 0
+      : Math.sign(v - current[i]) *
+        Math.floor(Math.abs(v - current[i]) / step) *
+        step,
+  );
+  // Round transactions, not market values. Any unspent remainder stays in cash.
+  // Rounded sales may free less than exact sales, so reduce purchases if needed.
+  let remaining = current[cash] - changes.reduce((s, n) => s + n, 0);
+  while (remaining < 0) {
+    const index = changes.findIndex((n) => n > 0);
+    if (index < 0) throw new Error("买卖资金不足。");
+    changes[index] -= step;
+    remaining += step;
+  }
+  changes[cash] = remaining - current[cash];
+  return p.assets.map((a, i) => {
+    const change = yuan(changes[i]);
     return {
       id: a.id,
       name: a.name,
       change,
-      after: yuan(desired[i]),
+      after: yuan(current[i] + changes[i]),
       limited:
         a.id !== CASH_ID && a.monthlyLimit !== null && change > a.monthlyLimit,
     };

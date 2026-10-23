@@ -259,7 +259,7 @@ export default function HoldingsEditor({
           </summary>
           <p className="field-note">
             留空不限，0
-            表示本月暂停。用于检查固定计划和约束本次纠偏；记录执行后扣除，跨月请重新核对。
+            表示本月暂停。几个月后回来时请重新核对额度，不要沿用过期的限购信息；记录执行后会扣减。
           </p>
           <div className="limit-grid">
             {draft.assets

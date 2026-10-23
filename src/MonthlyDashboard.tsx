@@ -142,9 +142,9 @@ export default function MonthlyDashboard({
           <div className="monthly-next">
             <Icon name="plan" size={22} />
             <div>
-              <strong>当前持仓偏离目标时，本月需要调整吗？</strong>
+              <strong>到了复查时间，看看是否需要调整</strong>
               <p>
-                再平衡会优先用这笔月预算补低配，列出本月该暂停与追加的类别；它会替代本月固定分配，不额外增加预算。
+                复查时先核对市值，再填写本次可追加资金。平时照常执行固定计划，无需每月回来记录。
               </p>
               <button className="btn primary" onClick={onRebalance}>
                 查看再平衡指导
@@ -175,9 +175,9 @@ export default function MonthlyDashboard({
       </div>
       <div className="panel monthly-maintenance">
         <div>
-          <strong>完成实际投入后，记得核对持仓</strong>
+          <strong>下次复查时，再集中核对持仓</strong>
           <p>
-            这份固定计划持续保留。月预算不会因更新持仓或记录一次再平衡而清零。
+            这份固定计划持续保留。按首页安排复查即可；长期月预算不会因一次再平衡而清零。
           </p>
         </div>
         <button className="btn" onClick={onHoldings}>

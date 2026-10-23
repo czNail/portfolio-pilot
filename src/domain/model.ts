@@ -1,5 +1,6 @@
 import type { MonthlyPlan } from "./monthly";
 import type { AllocationStrategy, RiskProfile } from "./strategy";
+import type { ReviewState } from "./review";
 
 export interface Asset {
   id: string;
@@ -36,6 +37,7 @@ export interface Portfolio {
   riskProfile?: RiskProfile;
   snapshot?: Snapshot;
   history?: ExecutionRecord[];
+  review?: ReviewState;
 }
 export const CASH_ID = "cash";
 export const MONEY_MAX = 1_000_000_000_000;

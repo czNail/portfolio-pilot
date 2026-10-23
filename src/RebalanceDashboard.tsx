@@ -10,6 +10,9 @@ import {
 import { monthlyReady, monthlyAllocation } from "./domain/monthly";
 import { Panel, Icon, NumberField, money } from "./components";
 import { PlanTable } from "./AllocationControls";
+import { reportText } from "./domain/report";
+import { Modal } from "./components";
+import type { ReviewMethod } from "./domain/review";
 export default function RebalanceDashboard({
   p,
   plan,
@@ -19,6 +22,11 @@ export default function RebalanceDashboard({
   onBudget,
   onExecute,
   blocked,
+  onRounding,
+  onActual,
+  reviewMode = false,
+  mode: selectedMode,
+  onMode,
 }: {
   p: Portfolio;
   plan: Plan | null;
@@ -28,8 +36,20 @@ export default function RebalanceDashboard({
   onBudget: (n: number) => void;
   onExecute: () => void;
   blocked: boolean;
+  onRounding?: (n: Portfolio["rounding"]) => void;
+  onActual?: () => void;
+  reviewMode?: boolean;
+  mode?: ReviewMethod;
+  onMode?: (mode: ReviewMethod) => void;
 }) {
-  const [mode, setMode] = useState<"cashflow" | "trade">("cashflow");
+  const [localMode, setLocalMode] = useState<ReviewMethod>("cashflow");
+  const mode = selectedMode ?? localMode;
+  const setMode = (next: ReviewMethod) => {
+    setLocalMode(next);
+    onMode?.(next);
+  };
+  const [copyFallback, setCopyFallback] = useState(false);
+  const [copied, setCopied] = useState(false);
   if (!monthlyReady(p))
     return (
       <Panel title="先确认定投目标比例">
@@ -52,6 +72,16 @@ export default function RebalanceDashboard({
     forecast = needed === null ? null : Math.ceil(needed / monthly.budget);
   const names = (rows: typeof over) =>
     rows.map((r) => p.assets.find((a) => a.id === r.id)!.name).join("、");
+  const report = plan ? reportText(p, plan, mode) : "";
+  const cashflowEnough = plan && !deviation(p, plan).breached;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopied(true);
+    } catch {
+      setCopyFallback(true);
+    }
+  };
   return (
     <>
       <div
@@ -67,7 +97,9 @@ export default function RebalanceDashboard({
             {!total.invested
               ? "先录入持仓，才能判断怎样再平衡"
               : current.breached
-                ? "需要把配置拉回目标范围"
+                ? cashflowEnough
+                  ? "本次新增资金可以把偏差调回范围"
+                  : "本次偏差较大，比较两种调整方案"
                 : "目前无需专门再平衡"}
           </h2>
           <p>
@@ -75,13 +107,44 @@ export default function RebalanceDashboard({
               ? "还没有持仓时，直接按每月固定计划开始投入。"
               : current.breached
                 ? `${over.length ? names(over) + "超配，暂缓追加。" : ""}${under.length ? "优先补足" + names(under) + "。" : ""}`
-                : "继续按固定定投清单执行，定期核对市值；不必为小偏差频繁交易。"}
+                : "继续按原计划定投，结束本次复查后按安排再来检查。"}
           </p>
         </div>
         <button className="btn" onClick={onHoldings}>
           更新持仓
         </button>
       </div>
+      {current.breached && plan && (
+        <div className="review-comparison">
+          <div className="panel">
+            <strong>新增资金纠偏</strong>
+            <p>本次买入 {money(plan.bought)} · 卖出 ¥0.00</p>
+            <span>
+              {cashflowEnough
+                ? "本次可回到容忍范围"
+                : "本次后仍有偏差，可与买卖方案比较"}
+            </span>
+          </div>
+          <div className="panel">
+            <strong>买卖调整</strong>
+            <p>
+              买入{" "}
+              {money(
+                full
+                  .filter((r) => r.id !== CASH_ID && r.change > 0)
+                  .reduce((s, r) => s + r.change, 0),
+              )}{" "}
+              · 卖出{" "}
+              {money(
+                full
+                  .filter((r) => r.id !== CASH_ID && r.change < 0)
+                  .reduce((s, r) => s - r.change, 0),
+              )}
+            </p>
+            <span>接近目标比例；先考虑费用、限额和到账时间</span>
+          </div>
+        </div>
+      )}
       {total.invested > 0 && (
         <Panel
           title="持仓与目标差在哪里？"
@@ -150,12 +213,12 @@ export default function RebalanceDashboard({
       <Panel
         title={
           mode === "cashflow"
-            ? "本月定投怎样调整？"
+            ? "这次新增资金怎样分配？"
             : "这次需要卖出和买入多少？"
         }
         description={
           mode === "cashflow"
-            ? "纠偏金额替代本月固定分配，不是在固定定投之外额外投入。"
+            ? "只安排本次填写的资金；过去几个月的投入已包含在持仓市值中。"
             : "按当前持仓、目标比例和本次新增资金计算到目标的参考交易。"
         }
       >
@@ -173,8 +236,25 @@ export default function RebalanceDashboard({
           </button>
         </div>
         <p className="field-note">
-          这里只调整本次金额；每月固定定投预算仍为 {money(monthly.budget)}。
+          这里只调整本次金额；每月固定定投预算仍为 {money(monthly.budget)}
+          。过去的定投不要重复计入。
         </p>
+        {onRounding && (
+          <label className="field rounding-field">
+            交易金额取整
+            <select
+              value={p.rounding}
+              onChange={(e) =>
+                onRounding(Number(e.target.value) as Portfolio["rounding"])
+              }
+            >
+              <option value={1}>按 1 元</option>
+              <option value={10}>按 10 元</option>
+              <option value={100}>按 100 元</option>
+            </select>
+            <small>买入、卖出金额按步长取整，尾差保留在待投资余额。</small>
+          </label>
+        )}
         {issues.length > 0 && (
           <div className="notice warning" role="alert">
             {issues.join(" ")}
@@ -246,23 +326,25 @@ export default function RebalanceDashboard({
                   <div className="plan-buttons">
                     <button
                       className="btn primary"
-                      disabled={blocked}
+                      disabled={blocked || plan.bought <= 0}
                       onClick={onExecute}
                     >
                       <Icon name="check" size={18} />
                       记录已按本次纠偏计划执行
                     </button>
-                    <button className="text-button" onClick={onHoldings}>
+                    <button
+                      className="text-button"
+                      onClick={onActual ?? onHoldings}
+                    >
                       成交不同？更新实际持仓
                     </button>
                   </div>
                 )}
                 {current.breached && (
-                  <div className="recovery-outlook">
-                    <h3>后续定投还要怎么做？</h3>
+                  <details className="recovery-outlook">
+                    <summary>查看只用新增资金纠偏的理论资金需求</summary>
                     <p>
-                      每月把 {money(monthly.budget)}{" "}
-                      优先分配给低配类别，超配类别暂缓追加；每次用最新持仓重新计算，回到范围后再按固定比例执行。
+                      本次按上方清单安排。长期定投计划继续保留，下次复查时用最新市值判断；这里的预算倍数不决定复查日期。
                     </p>
                     <p>
                       {forecast === null
@@ -289,7 +371,7 @@ export default function RebalanceDashboard({
                         ? "持有目标为零的类别时，仅追加资金只能稀释其占比，无法将其金额精确降为零。"
                         : `若要求精确达到全部目标比例，理论上至少需累计新增 ${money(exact)}。`}
                     </p>
-                  </div>
+                  </details>
                 )}
                 <details className="inline-details">
                   <summary>查看计划前后完整比例</summary>
@@ -357,14 +439,68 @@ export default function RebalanceDashboard({
                 <p className="field-note">
                   这是调回目标比例的金额参考，未计费用、税费、赎回限制、限购和实际成交差异。先核对卖出成本与到账时间，再安排买入；存在额度提示时，分批进行或先用定投纠偏。
                 </p>
-                <button className="btn primary" onClick={onHoldings}>
-                  完成实际买卖后，更新持仓
-                </button>
+                <p className="field-note">
+                  调整后待投资余额{" "}
+                  {money(full.find((r) => r.id === CASH_ID)?.after ?? 0)}
+                  ，用于保留交易取整尾差。
+                </p>
+                <div className="button-row">
+                  {reviewMode && (
+                    <button
+                      className="btn primary"
+                      disabled={
+                        blocked ||
+                        full.some((r) => r.limited) ||
+                        !full.some((r) => r.change !== 0)
+                      }
+                      onClick={onExecute}
+                    >
+                      记录已按买卖方案执行
+                    </button>
+                  )}
+                  <button className="btn" onClick={onActual ?? onHoldings}>
+                    完成实际买卖后，更新持仓
+                  </button>
+                </div>
               </>
             )}
           </>
         )}
+        {plan && (
+          <div className="report-actions">
+            <button className="btn" onClick={copy}>
+              复制本次方案
+            </button>
+            <button className="btn" onClick={() => window.print()}>
+              打印本次方案
+            </button>
+            <span role="status">
+              {copied ? "已复制；修改方案后请重新复制。" : ""}
+            </span>
+          </div>
+        )}
       </Panel>
+      {plan && (
+        <section className="print-report">
+          <h1>本次复查方案</h1>
+          <pre>{report}</pre>
+        </section>
+      )}
+      {copyFallback && (
+        <Modal title="复制本次方案" onClose={() => setCopyFallback(false)}>
+          <p>浏览器暂不能直接复制，请选中下面的内容复制。</p>
+          <textarea
+            className="report-copy"
+            aria-label="本次方案文本"
+            readOnly
+            value={report}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <button className="btn" onClick={() => setCopyFallback(false)}>
+            完成
+          </button>
+        </Modal>
+      )}
     </>
   );
 }

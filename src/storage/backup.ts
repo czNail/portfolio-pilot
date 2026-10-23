@@ -1,6 +1,7 @@
 import { validate, type Portfolio } from "../domain/model";
 import { readDetails } from "./details";
 export const STORAGE_KEY = "portfolio-pilot:portfolio:v4";
+export const RESTORE_POINT_KEY = "portfolio-pilot:before-restore:v4";
 export const MAX_BACKUP_BYTES = 1024 * 1024;
 export interface Envelope {
   app: "portfolio-pilot";

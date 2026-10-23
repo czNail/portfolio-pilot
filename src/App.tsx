@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   emptyPortfolio,
   demoPortfolio,
-  totals,
   validate,
   CASH_ID,
   type Portfolio,
@@ -13,22 +12,27 @@ import {
   confirmStrategy,
   type RiskProfile,
 } from "./domain/strategy";
-import { executePlan, snapshotAge } from "./domain/planning";
+
 import { loadPortfolio } from "./storage/session";
-import {
-  STORAGE_KEY,
-  MAX_BACKUP_BYTES,
-  envelope,
-  parseBackup,
-  downloadText,
-} from "./storage/backup";
+import { STORAGE_KEY, envelope, downloadText } from "./storage/backup";
 import { Icon, Panel, Modal, colors, money, pct } from "./components";
 import { ShareSlider } from "./AllocationControls";
 import StrategyEditor from "./StrategyEditor";
 import HoldingsEditor from "./HoldingsEditor";
 import MonthlyDashboard from "./MonthlyDashboard";
-import RebalanceDashboard from "./RebalanceDashboard";
 import { monthlyReady } from "./domain/monthly";
+import ReviewHome from "./ReviewHome";
+import ReviewWorkspace from "./ReviewWorkspace";
+import BackupWorkspace from "./BackupWorkspace";
+import {
+  beginReview,
+  finishReview,
+  reviewState,
+  capture,
+  localDate,
+  type ReviewRecord,
+} from "./domain/review";
+import { fullRebalance } from "./domain/planning";
 
 type Page = "monthly" | "plan" | "holdings" | "strategy" | "risk" | "backup";
 function boot() {
@@ -56,23 +60,32 @@ export default function App() {
     [undo, setUndo] = useState<Portfolio | null>(null),
     [beforeDemo, setBeforeDemo] = useState<Portfolio | null>(null);
   const [editorSetup, setEditorSetup] = useState(false);
+  const [demoPicker, setDemoPicker] = useState(false);
   const [executing, setExecuting] = useState(false),
     [riskAfter, setRiskAfter] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null),
-    file = useRef<HTMLInputElement>(null),
     executionLock = useRef(false);
   const signature = JSON.stringify(p),
     issues = validate(p),
-    valid = issues.length === 0,
-    total = totals(p);
-  const planIssues = validate(p, { forPlan: true });
+    valid = issues.length === 0;
   const plan = useMemo(() => {
     if (!monthlyReady(p) || validate(p, { forPlan: true }).length) return null;
     return rebalance(p);
   }, [signature]);
-  const age = snapshotAge(p.snapshot?.asOf),
-    stale = total.invested > 0 && (age === null || age > 30);
-  const risk = valid ? stress(p, riskAfter && plan ? plan : undefined) : null;
+  const riskPlan = useMemo(() => {
+    if (!plan || p.review?.active?.method !== "trade") return plan;
+    const trades = fullRebalance(p, plan);
+    return {
+      ...plan,
+      rows: plan.rows.map((row) => ({
+        ...row,
+        after: trades.find((r) => r.id === row.id)!.after,
+      })),
+    };
+  }, [plan, p.review?.active?.method]);
+  const risk = valid
+    ? stress(p, riskAfter && riskPlan ? riskPlan : undefined)
+    : null;
   const portfolioRisk = risk
     ? (() => {
         const rows = risk.rows.filter((r) => r.id !== "reserve"),
@@ -143,11 +156,25 @@ export default function App() {
       setMessage("请先修正输入，再导出备份。");
       return;
     }
-    downloadText(
-      JSON.stringify(envelope(p), null, 2),
-      `portfolio-pilot-${new Date().toISOString().slice(0, 10)}.json`,
-    );
-    setMessage("备份已导出。");
+    const next = monthlyReady(p)
+      ? {
+          ...p,
+          review: {
+            ...reviewState(p),
+            lastExportedAt: new Date().toISOString(),
+          },
+        }
+      : p;
+    try {
+      downloadText(
+        JSON.stringify(envelope(next), null, 2),
+        `portfolio-pilot-${localDate()}.json`,
+      );
+      setP(next);
+      setMessage("备份已导出。");
+    } catch {
+      setMessage("备份未能导出，请重试。");
+    }
   };
   const replaceData = (next: Portfolio) => {
     setP(next);
@@ -158,73 +185,84 @@ export default function App() {
     setNotice("");
     go("monthly");
   };
-  const importFile = async (f: File) => {
-    try {
-      if (f.size > MAX_BACKUP_BYTES)
-        throw new Error("备份文件不能超过 1 MiB。");
-      const e = parseBackup(await f.text());
-      if (!window.confirm("导入会替换当前持仓、策略与执行记录，继续吗？"))
-        return;
-      replaceData(e.portfolio);
-      setMessage("已恢复备份。");
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "导入失败。");
-    } finally {
-      if (file.current) file.current.value = "";
+  const openReview = () => {
+    if (!monthlyReady(p)) {
+      setEditorSetup(true);
+      go("strategy");
+      return;
     }
-  };
-  const startDemo = () => {
-    const demo = demoPortfolio(),
-      profile: RiskProfile = {
-        horizon: "3to7",
-        reserve: "over6",
-        loss: 35,
-        reaction: "hold",
-        region: "equal",
-      };
-    setBeforeDemo(p);
-    setP({
-      ...confirmStrategy(
-        demo,
-        [40, 35, 25, 0, 0],
-        profile,
-        "不含债券的示例",
-        true,
-      ),
-      monthlyPlan: { budget: 4000, assetIds: ["us", "cn", "gold"] },
-      snapshot: {
-        asOf: new Date().toISOString().slice(0, 10),
-        estimated: true,
-      },
-    });
+    setP(beginReview(p));
     setUndo(null);
+    go("plan");
+  };
+  const startDemo = (kind: "normal" | "drift" | "limited") => {
+    const profile: RiskProfile = {
+      horizon: "over7",
+      reserve: "over6",
+      loss: 50,
+      reaction: "hold",
+      region: "equal",
+    };
+    const base = confirmStrategy(
+      demoPortfolio(),
+      [25, 20, 10, 45, 0],
+      profile,
+      "长期配置示例",
+      true,
+    );
+    const values =
+      kind === "normal"
+        ? [25000, 20000, 10000, 45000, 0]
+        : [50000, 15000, 10000, 25000, 0];
+    const demo: Portfolio = {
+      ...base,
+      monthlyPlan: { budget: 4000, assetIds: ["us", "cn", "gold", "bonds"] },
+      assets: base.assets.map((a, i) => ({
+        ...a,
+        value: values[i],
+        monthlyLimit: kind === "limited" && a.id === "bonds" ? 0 : null,
+      })),
+      snapshot: { asOf: localDate(), estimated: false },
+    };
+    demo.review = {
+      ...reviewState(demo),
+      nextDate: localDate(),
+      rationale: "这笔钱用于长期积累；先确认生活安全垫，再按约定比例持续投入。",
+    };
+    setBeforeDemo(p);
+    setP(demo);
+    setUndo(null);
+    setDemoPicker(false);
     go("monthly");
+  };
+  const completeReview = (outcome: ReviewRecord["outcome"], input = p) => {
+    try {
+      const next = finishReview(input, outcome);
+      setUndo(p);
+      setP(next);
+      go("monthly");
+      setMessage("本次复查已保存，下次日期已安排。可以导出一份备份。");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "记录失败。");
+    }
   };
   const finishExecution = () => {
     if (!plan || blocked || executionLock.current) return;
     executionLock.current = true;
-    try {
-      const next = executePlan(p, plan);
-      setUndo(p);
-      setP(next);
-      setMessage("已按计划更新估算持仓；下次请核对实际市值。");
-      setExecuting(false);
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "记录失败。");
-    } finally {
-      setTimeout(() => {
-        executionLock.current = false;
-      }, 0);
-    }
+    completeReview("estimated");
+    setExecuting(false);
+    setTimeout(() => {
+      executionLock.current = false;
+    }, 0);
   };
   const pageTitles: Record<Page, [string, string]> = {
     monthly: [
-      "每月定投，照着计划执行",
-      "预算、类别和比例确认一次，清楚知道每个月各投多少。",
+      "配置一次，几个月后再来复查",
+      "平时按原计划执行，到期核对持仓，再决定怎样调整。",
     ],
     plan: [
-      "再平衡，知道该怎样调整",
-      "对照目标找出超配与低配，选择用后续定投或买卖调回。",
+      "本次复查，知道该怎样调整",
+      "核对市值、确认本次资金，按清单完成调整。",
     ],
     holdings: ["更新我的持仓", "按资产大类记下市值，计划会据此重新计算。"],
     strategy: [
@@ -271,7 +309,7 @@ export default function App() {
                 key={id}
                 className={page === id ? "selected" : ""}
                 aria-current={page === id ? "page" : undefined}
-                onClick={() => go(id)}
+                onClick={() => (id === "plan" ? openReview() : go(id))}
               >
                 {label}
               </button>
@@ -314,7 +352,7 @@ export default function App() {
             <p>{pageTitles[page][1]}</p>
           </div>
           {page === "monthly" && !p.demo && (
-            <button className="text-button" onClick={startDemo}>
+            <button className="text-button" onClick={() => setDemoPicker(true)}>
               体验示例
               <Icon name="arrow" size={16} />
             </button>
@@ -371,10 +409,13 @@ export default function App() {
             p={p}
             startAtSetup={editorSetup}
             onSave={(next) => {
-              setP(next);
+              setP({
+                ...next,
+                review: { ...reviewState(next), active: undefined },
+              });
               setUndo(null);
               go("monthly");
-              setMessage("每月定投计划已确认；需要纠偏时查看再平衡指导。");
+              setMessage("长期计划已确认，下一次复查时间已安排。");
             }}
             onCancel={() => go("monthly")}
           />
@@ -383,7 +424,23 @@ export default function App() {
           <HoldingsEditor
             p={p}
             onSave={(next) => {
-              setP(next);
+              if (monthlyReady(next)) {
+                const reviewing = beginReview({
+                  ...next,
+                  review: { ...reviewState(next), active: undefined },
+                });
+                setP({
+                  ...reviewing,
+                  review: {
+                    ...reviewing.review!,
+                    active: {
+                      ...reviewing.review!.active!,
+                      phase: "funding",
+                      before: capture(next),
+                    },
+                  },
+                });
+              } else setP(next);
               setUndo(null);
               go("plan");
               setMessage(
@@ -396,80 +453,64 @@ export default function App() {
           />
         )}
         {page === "monthly" && (
-          <MonthlyDashboard
-            p={p}
-            onEdit={(setup) => {
-              setEditorSetup(setup);
-              go("strategy");
-            }}
-            onRebalance={() => {
-              if (p.budget === 0 && p.monthlyPlan)
-                apply({ budget: p.monthlyPlan.budget });
-              go("plan");
-            }}
-            onHoldings={() => go("holdings")}
-          />
-        )}
-        {page === "plan" && (
           <>
-            {stale && (
-              <div className="notice warning">
-                <Icon name="info" />
-                <span>
-                  {age === null
-                    ? "持仓日期尚未确认，请核对市值后参考再平衡金额。"
-                    : `持仓已 ${age} 天未核对，计划可能与最新市值不同。`}
-                </span>
-                <button className="text-button" onClick={() => go("holdings")}>
-                  核对持仓
-                </button>
-              </div>
+            {monthlyReady(p) && (
+              <ReviewHome
+                p={p}
+                onChange={(next) => {
+                  setP(next);
+                  setUndo(null);
+                }}
+                onStart={openReview}
+                onExport={exportData}
+                onEdit={() => {
+                  setEditorSetup(false);
+                  go("strategy");
+                }}
+              />
             )}
-            {p.snapshot?.estimated && (
-              <p className="estimate-note">
-                <Icon name="info" size={15} />
-                当前为估算持仓，未包含最新净值、费用与实际成交差异。
-              </p>
-            )}
-            <RebalanceDashboard
+            <details className="long-term-plan" open={!monthlyReady(p)}>
+              {monthlyReady(p) && <summary>长期定投计划与目标比例</summary>}
+              <MonthlyDashboard
+                p={p}
+                onEdit={(setup) => {
+                  setEditorSetup(setup);
+                  go("strategy");
+                }}
+                onRebalance={openReview}
+                onHoldings={() => go("holdings")}
+              />
+            </details>
+          </>
+        )}
+        {page === "plan" &&
+          (p.review?.active ? (
+            <ReviewWorkspace
               p={p}
-              plan={plan}
-              issues={planIssues}
-              blocked={blocked}
+              onChange={(next) => {
+                setP(next);
+                setUndo(null);
+              }}
+              onPause={() => go("monthly")}
+              onComplete={completeReview}
+              onEstimate={() => {
+                executionLock.current = false;
+                setExecuting(true);
+              }}
               onEdit={() => {
                 setEditorSetup(true);
                 go("strategy");
               }}
-              onHoldings={() => go("holdings")}
-              onBudget={(budget) => apply({ budget, source: "external" })}
-              onExecute={() => {
-                executionLock.current = false;
-                setExecuting(true);
-              }}
+              blocked={blocked}
             />
-            {!!p.history?.length && (
-              <details className="panel execution-history">
-                <summary>
-                  <strong>最近再平衡执行记录</strong>
-                  <span>{p.history.length} 笔</span>
-                </summary>
-                {p.history.map((r) => (
-                  <div className="history-row" key={r.id}>
-                    <div>
-                      <strong>{r.executedAt.slice(0, 10)}</strong>
-                      <p>
-                        {r.buys
-                          .map((a) => `${a.name} ${money(a.amount)}`)
-                          .join(" · ") || "本次未安排买入"}
-                      </p>
-                    </div>
-                    <span>{money(r.budget)}</span>
-                  </div>
-                ))}
-              </details>
-            )}
-          </>
-        )}
+          ) : (
+            <Panel title="开始一次复查">
+              <p>先核对最新持仓，再计算本次调整金额。</p>
+              <button className="btn primary" onClick={openReview}>
+                开始本次复查
+              </button>
+            </Panel>
+          ))}
         {page === "risk" && (
           <>
             <div className="risk-toolbar">
@@ -565,84 +606,24 @@ export default function App() {
           </>
         )}
         {page === "backup" && (
-          <>
-            <Panel
-              title="备份与恢复"
-              description="持仓、目标比例、风险评估和最近执行记录一起保存。"
-            >
-              <div className="backup-grid">
-                <div>
-                  <Icon name="download" size={28} />
-                  <h3>保存一份备份</h3>
-                  <p>重要调整后导出，换设备时再导入。</p>
-                  <button className="btn primary" onClick={exportData}>
-                    导出 JSON 备份
-                  </button>
-                </div>
-                <div>
-                  <Icon name="upload" size={28} />
-                  <h3>从备份恢复</h3>
-                  <p>恢复当前版本导出的 JSON 备份。</p>
-                  <button className="btn" onClick={() => file.current?.click()}>
-                    选择备份文件
-                  </button>
-                  <input
-                    ref={file}
-                    className="visually-hidden"
-                    type="file"
-                    accept=".json,application/json"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void importFile(f);
-                    }}
-                  />
-                </div>
-              </div>
-            </Panel>
-            {blocked && (
-              <Panel title="原始数据仍保留">
-                <p>当前保存已暂停，可先下载原始内容，再导入有效备份恢复。</p>
-                <button
-                  className="btn"
-                  onClick={() =>
-                    downloadText(
-                      recovery,
-                      "portfolio-pilot-recovery.txt",
-                      "text/plain",
-                    )
-                  }
-                >
-                  下载原始内容
-                </button>
-              </Panel>
-            )}
-            <Panel title="本地存储说明">
-              <p className="body-copy">
-                所有数据只保存在当前浏览器，没有云同步。清理浏览器数据会丢失记录。建议在重要调整后导出一份备份。
-              </p>
-              {savedAt && (
-                <p className="field-note">
-                  最近自动保存：{new Date(savedAt).toLocaleString()}
-                </p>
-              )}
-            </Panel>
-            <Panel title="重新开始">
-              <div className="maintenance-row">
-                <p>清空本工具当前的持仓、策略与记录，建议先导出备份。</p>
-                <button
-                  className="btn danger"
-                  onClick={() => {
-                    if (window.confirm("清空当前持仓、策略和执行记录？")) {
-                      replaceData(emptyPortfolio());
-                      setMessage("已重新开始。");
-                    }
-                  }}
-                >
-                  清空当前配置
-                </button>
-              </div>
-            </Panel>
-          </>
+          <BackupWorkspace
+            p={p}
+            savedAt={savedAt}
+            blocked={blocked}
+            recovery={recovery}
+            onExport={exportData}
+            onRestore={(next) => {
+              replaceData(next);
+              setMessage("已恢复备份；恢复前的数据可在备份页找回。");
+            }}
+            onMessage={setMessage}
+            onReset={() => {
+              if (window.confirm("清空当前持仓、策略和复查记录？")) {
+                replaceData(emptyPortfolio());
+                setMessage("已重新开始。");
+              }
+            }}
+          />
         )}
         <footer className="app-footer">
           <span>Portfolio Pilot · 木匠钉子 / Neil Chen</span>
@@ -660,31 +641,51 @@ export default function App() {
           </div>
         </footer>
       </main>
+      {demoPicker && (
+        <Modal title="选择一个复查示例" onClose={() => setDemoPicker(false)}>
+          <div className="demo-options">
+            <button className="btn" onClick={() => startDemo("normal")}>
+              正常复查：继续原计划
+            </button>
+            <button className="btn" onClick={() => startDemo("drift")}>
+              持仓偏离：比较调整方案
+            </button>
+            <button className="btn" onClick={() => startDemo("limited")}>
+              额度受限：查看剩余资金
+            </button>
+          </div>
+          <p className="field-note">示例只在内存中运行，不覆盖你的数据。</p>
+        </Modal>
+      )}
       {executing && plan && (
         <Modal
           title="已经按这份计划完成操作？"
           onClose={() => setExecuting(false)}
         >
           <p className="body-copy">
-            确认后更新估算持仓并扣除剩余可买额度。本次再平衡金额会清零，每月固定定投预算保持不变。
+            确认后保存本次复查与估算持仓，安排下一次检查。本次新增资金清零，长期月预算保持不变。
           </p>
           <div className="execution-confirm-list">
-            {plan.rows
-              .filter((r) => r.buy > 0 && r.id !== CASH_ID)
-              .map((r) => (
-                <div key={r.id}>
-                  <span>{p.assets.find((a) => a.id === r.id)!.name}</span>
-                  <strong>{money(r.buy)}</strong>
-                </div>
-              ))}
-            {plan.keptCash > 0 && (
-              <div>
-                <span>
-                  {p.source === "cash" ? "预算中未动用" : "预算中留作现金"}
-                </span>
-                <strong>{money(plan.keptCash)}</strong>
+            {(p.review?.active?.method === "trade"
+              ? fullRebalance(p, plan)
+                  .filter((r) => r.id !== CASH_ID && r.change !== 0)
+                  .map((r) => ({ id: r.id, name: r.name, amount: r.change }))
+              : plan.rows
+                  .filter((r) => r.buy > 0 && r.id !== CASH_ID)
+                  .map((r) => ({
+                    id: r.id,
+                    name: p.assets.find((a) => a.id === r.id)!.name,
+                    amount: r.buy,
+                  }))
+            ).map((r) => (
+              <div key={r.id}>
+                <span>{r.name}</span>
+                <strong>
+                  {r.amount < 0 ? "卖出 " : "买入 "}
+                  {money(Math.abs(r.amount))}
+                </strong>
               </div>
-            )}
+            ))}
           </div>
           <p className="field-note">
             实际金额与计划不同，请取消并直接更新持仓。此操作不会向任何交易平台下单。
@@ -713,7 +714,7 @@ export default function App() {
               onClick={() => {
                 setP(undo);
                 setUndo(null);
-                setMessage("已撤销，恢复执行前的持仓、预算和额度。");
+                setMessage("已撤销，恢复本次复查前的持仓、资金与安排。");
               }}
             >
               撤销

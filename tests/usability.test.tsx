@@ -123,9 +123,11 @@ test("月预算与类别确认、无债券提示、固定定投、两种再平�
     await input("黄金当前总市值", "10000");
     await input("债券当前总市值", "25000");
     await click("保存持仓");
+    assert.match(container.textContent!, /这次准备追加多少资金/);
+    await input("本次用于再平衡的新增资金", "1000");
+    await click("查看本次建议");
     assert.match(container.textContent!, /持仓与目标差在哪里/);
     assert.match(container.textContent!, /本次暂停追加/);
-    await input("本次用于再平衡的新增资金", "1000");
     await click("通过买卖一次调回");
     assert.match(
       container.querySelector(".trade-reference-list")!.textContent!,
@@ -168,6 +170,7 @@ test("月预算与类别确认、无债券提示、固定定投、两种再平�
     );
     const saved = localStorage.getItem(STORAGE_KEY);
     await click("体验示例");
+    await click("正常复查：继续原计划");
     await flush();
     assert.equal(localStorage.getItem(STORAGE_KEY), saved);
     await click("退出演示");
