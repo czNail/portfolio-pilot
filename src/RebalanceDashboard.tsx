@@ -27,6 +27,7 @@ export default function RebalanceDashboard({
   reviewMode = false,
   mode: selectedMode,
   onMode,
+  onNoChange,
 }: {
   p: Portfolio;
   plan: Plan | null;
@@ -41,6 +42,7 @@ export default function RebalanceDashboard({
   reviewMode?: boolean;
   mode?: ReviewMethod;
   onMode?: (mode: ReviewMethod) => void;
+  onNoChange?: () => void;
 }) {
   const [localMode, setLocalMode] = useState<ReviewMethod>("cashflow");
   const mode = selectedMode ?? localMode;
@@ -110,9 +112,20 @@ export default function RebalanceDashboard({
                 : "继续按原计划定投，结束本次复查后按安排再来检查。"}
           </p>
         </div>
-        <button className="btn" onClick={onHoldings}>
-          更新持仓
-        </button>
+        <div className="button-row">
+          {onNoChange && !current.breached && (
+            <button
+              className="btn primary"
+              disabled={blocked || !plan}
+              onClick={onNoChange}
+            >
+              本次无需调整，结束复查
+            </button>
+          )}
+          <button className="btn" onClick={onHoldings}>
+            更新持仓
+          </button>
+        </div>
       </div>
       {current.breached && plan && (
         <div className="review-comparison">

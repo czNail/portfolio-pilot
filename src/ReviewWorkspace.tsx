@@ -1,6 +1,7 @@
+import { useEffect, useRef } from "react";
 import type { Portfolio } from "./domain/model";
 import { capture, reviewState, type ReviewRecord } from "./domain/review";
-import { deviation, snapshotAge } from "./domain/planning";
+import { snapshotAge } from "./domain/planning";
 import { rebalance } from "./domain/rebalance";
 import { validate } from "./domain/model";
 import HoldingsEditor from "./HoldingsEditor";
@@ -24,8 +25,13 @@ export default function ReviewWorkspace({
   onEdit: () => void;
   blocked: boolean;
 }) {
+  const progress = useRef<HTMLElement>(null);
   const state = reviewState(p),
     session = state.active!;
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    progress.current?.focus({ preventScroll: true });
+  }, [session.phase]);
   const setSession = (patch: Partial<typeof session>) =>
     onChange({ ...p, review: { ...state, active: { ...session, ...patch } } });
   const issues = validate(p, { forPlan: true }),
@@ -34,7 +40,12 @@ export default function ReviewWorkspace({
     stale = age === null || age > 30 || age < 0;
   return (
     <>
-      <nav className="review-progress" aria-label="本次复查进度">
+      <nav
+        ref={progress}
+        tabIndex={-1}
+        className="review-progress"
+        aria-label="本次复查进度"
+      >
         {["核对持仓", "本次资金", "调整建议"].map((label, i) => (
           <span
             key={label}
@@ -175,6 +186,7 @@ export default function ReviewWorkspace({
             }
             onRounding={(rounding) => onChange({ ...p, rounding })}
             onExecute={onEstimate}
+            onNoChange={() => onComplete("unchanged")}
             reviewMode
             mode={session.method}
             onMode={(method) => setSession({ method })}
@@ -184,15 +196,6 @@ export default function ReviewWorkspace({
             description="保存本次结论和持仓快照，安排几个月后的下一次检查。"
           >
             <div className="button-row">
-              {!deviation(p).breached && (
-                <button
-                  className="btn primary"
-                  disabled={blocked || stale || issues.length > 0}
-                  onClick={() => onComplete("unchanged")}
-                >
-                  本次无需调整，结束复查
-                </button>
-              )}
               <button
                 className="btn"
                 disabled={blocked}

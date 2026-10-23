@@ -275,6 +275,17 @@ export default function App() {
       "持仓、策略和执行记录保存在当前浏览器，也可以备份带走。",
     ],
   };
+  const monthlyDashboard = (
+    <MonthlyDashboard
+      p={p}
+      onEdit={(setup) => {
+        setEditorSetup(setup);
+        go("strategy");
+      }}
+      onRebalance={openReview}
+      onHoldings={() => go("holdings")}
+    />
+  );
   return (
     <div className="pilot-app">
       <a className="skip" href="#main">
@@ -469,18 +480,14 @@ export default function App() {
                 }}
               />
             )}
-            <details className="long-term-plan" open={!monthlyReady(p)}>
-              {monthlyReady(p) && <summary>长期定投计划与目标比例</summary>}
-              <MonthlyDashboard
-                p={p}
-                onEdit={(setup) => {
-                  setEditorSetup(setup);
-                  go("strategy");
-                }}
-                onRebalance={openReview}
-                onHoldings={() => go("holdings")}
-              />
-            </details>
+            {monthlyReady(p) ? (
+              <details className="long-term-plan">
+                <summary>长期定投计划与目标比例</summary>
+                {monthlyDashboard}
+              </details>
+            ) : (
+              monthlyDashboard
+            )}
           </>
         )}
         {page === "plan" &&
