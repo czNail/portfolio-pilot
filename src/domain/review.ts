@@ -193,7 +193,7 @@ export function finishReview(
     },
   };
 }
-export function calendarText(date: string, now = new Date()) {
+export function calendarText(date: string, now = new Date(), temporary = false) {
   if (!validDate(date)) throw new Error("复查日期无效。");
   const next = new Date(date + "T00:00:00Z");
   next.setUTCDate(next.getUTCDate() + 1);
@@ -210,8 +210,8 @@ export function calendarText(date: string, now = new Date()) {
       .replace(/\.\d{3}Z$/, "Z")}`,
     `DTSTART;VALUE=DATE:${date.replaceAll("-", "")}`,
     `DTEND;VALUE=DATE:${next.toISOString().slice(0, 10).replaceAll("-", "")}`,
-    "SUMMARY:资产配置复查",
-    "DESCRIPTION:核对最新持仓后，再决定是否需要再平衡。",
+    temporary ? "SUMMARY:复查临时定投设置" : "SUMMARY:资产配置复查",
+    temporary ? "DESCRIPTION:核对最新持仓与支付宝定投设置，决定恢复原计划或继续调整。" : "DESCRIPTION:核对最新持仓后，再决定是否需要再平衡。",
     "URL:https://cznail.github.io/portfolio-pilot/",
     "BEGIN:VALARM",
     "TRIGGER:-P1D",

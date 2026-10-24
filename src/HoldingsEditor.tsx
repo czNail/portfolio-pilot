@@ -84,7 +84,7 @@ export default function HoldingsEditor({
     <div className="holdings-workspace">
       <Panel
         title="更新当前持仓"
-        description="填各类资产的最新市值，不需要填写基金名称。未持有可留空。"
+        description="打开支付宝，按类别填写最新市值。同类多只基金可直接输入 1200+3500.50，自动合计；未持有可留空。"
         action={
           <div className="segmented">
             <button

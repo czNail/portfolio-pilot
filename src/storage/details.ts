@@ -5,6 +5,7 @@ import {
 } from "../domain/model";
 import { RULE_VERSION, validProfile } from "../domain/strategy";
 import { readReview } from "./review";
+import { readDailySettings, readAdjustment } from "./daily";
 
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
@@ -18,6 +19,8 @@ const money = (v: unknown) =>
   Math.abs(v * 100 - Math.round(v * 100)) < 0.0001;
 export function readDetails(x: Record<string, unknown>): Partial<Portfolio> {
   const result: Partial<Portfolio> = {};
+  if (x.dailySettings !== undefined) result.dailySettings = readDailySettings(x.dailySettings);
+  if (x.adjustment !== undefined) result.adjustment = readAdjustment(x.adjustment);
   if (x.review !== undefined) result.review = readReview(x.review);
   if (x.monthlyPlan !== undefined) {
     const m = x.monthlyPlan;

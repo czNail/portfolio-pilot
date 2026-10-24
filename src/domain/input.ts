@@ -6,6 +6,16 @@ export function parseNumberInput(
   if (!clean) return nullable ? null : 0;
   return /^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(clean) ? Number(clean) : NaN;
 }
+// Monetary addition only: never evaluate executable expressions or round bad terms.
+export function parseMoneyInput(text: string, nullable = false): number | null {
+  const clean = text.replace(/[,，¥￥\s]/g, "").replaceAll("＋", "+");
+  if (!clean) return nullable ? null : 0;
+  const terms = clean.split("+");
+  if (terms.some((s) => !/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(s)))
+    return NaN;
+  const total = terms.reduce((sum, s) => sum + Math.round(Number(s) * 100), 0);
+  return Number.isSafeInteger(total) ? total / 100 : NaN;
+}
 // Largest remainder rounding keeps percentages and monetary totals exact.
 export function distributeUnits(
   weights: readonly number[],
