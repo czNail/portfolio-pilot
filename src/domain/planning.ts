@@ -1,4 +1,4 @@
-import { cents, yuan, totals, CASH_ID, type Portfolio } from "./model";
+import { cents, yuan, totals, CASH_ID, newId, type Portfolio } from "./model";
 import { strategyConfirmed } from "./strategy";
 import { rebalance, type Plan } from "./rebalance";
 import { distributeUnits } from "./input";
@@ -51,7 +51,7 @@ export function executePlan(
     throw new Error("持仓或预算已改变，请重新查看计划。");
   if (plan.budget <= 0) throw new Error("本次预算为零，无需记录执行。");
   const record = {
-    id: crypto.randomUUID(),
+    id: newId("execution"),
     executedAt: now,
     budget: p.budget,
     source: p.source,

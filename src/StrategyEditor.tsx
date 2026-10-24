@@ -108,6 +108,10 @@ export default function StrategyEditor({
   );
   const [step, setStep] = useState(p.monthlyPlan && !startAtSetup ? 4 : -1);
   const [budget, setBudget] = useState(p.monthlyPlan?.budget ?? 0);
+  const [budgetUnit, setBudgetUnit] = useState<"monthly" | "daily">(
+    p.dailySettings ? "daily" : "monthly",
+  );
+  const [dailyBudget, setDailyBudget] = useState(p.dailySettings?.budget ?? 0);
   const [selected, setSelected] = useState(
     p.monthlyPlan?.assetIds ??
       p.assets
@@ -197,8 +201,9 @@ export default function StrategyEditor({
     );
     setAck(false);
   };
+  const previewBudget = budgetUnit === "daily" ? dailyBudget : budget;
   const amounts = budgetValid
-    ? distributeUnits(weights, cents(budget))
+    ? distributeUnits(weights, cents(previewBudget))
     : p.assets.map(() => 0);
   const save = () => {
     const next = confirmStrategy(
@@ -214,6 +219,17 @@ export default function StrategyEditor({
       source: "external",
       budget: p.monthlyPlan ? p.budget : budget,
       monthlyPlan: { budget, assetIds: selected },
+      ...(budgetUnit === "daily"
+        ? {
+            dailySettings: {
+              ...(p.dailySettings ?? {
+                cadence: "weekdays" as const,
+                rules: {},
+              }),
+              budget: dailyBudget,
+            },
+          }
+        : {}),
     });
   };
   return (
@@ -249,16 +265,54 @@ export default function StrategyEditor({
       {step === -1 ? (
         <Panel
           className="question-panel setup-panel"
-          title="先确定每月投入预算"
-          description="填写已经扣除生活费、备用金和预留现金后，每月可以持续投入的金额。"
+          title="先确定可以持续投入的预算"
+          description="填写已经扣除生活费、备用金和预留现金后的预算。可以按月填写，也可以直接按每日填写。"
         >
-          <NumberField
-            label="每月可定投金额"
-            value={budget}
-            emptyZero
-            placeholder="例如 4,000"
-            onChange={(v) => setBudget(v ?? 0)}
-          />
+          <div className="segmented" role="group" aria-label="预算填写方式">
+            <button
+              className={budgetUnit === "monthly" ? "selected" : ""}
+              onClick={() => setBudgetUnit("monthly")}
+            >
+              按每月预算填写
+            </button>
+            <button
+              className={budgetUnit === "daily" ? "selected" : ""}
+              onClick={() => {
+                if (budgetUnit === "monthly") {
+                  setDailyBudget(yuan(Math.floor(cents(budget) / 21)));
+                }
+                setBudgetUnit("daily");
+              }}
+            >
+              按每日预算填写
+            </button>
+          </div>
+          {budgetUnit === "daily" ? (
+            <>
+              <NumberField
+                label="每日可定投金额"
+                value={dailyBudget}
+                emptyZero
+                onChange={(v) => {
+                  setDailyBudget(v ?? 0);
+                  setBudget(yuan(cents(v ?? 0) * 21));
+                }}
+                help="每个扣款日的总预算，支持加法；每月参考预算按 21 次估算，实际总额随扣款次数变化。"
+              />
+              <p className="field-note">
+                每月参考预算 {Number.isFinite(budget) ? money(budget) : "—"}
+                。每日金额将直接保留到首页，不必重新换算。
+              </p>
+            </>
+          ) : (
+            <NumberField
+              label="每月可定投金额"
+              value={budget}
+              emptyZero
+              placeholder="例如 4,000"
+              onChange={(v) => setBudget(v ?? 0)}
+            />
+          )}
           <p className="field-note">
             这笔预算会完整分配给选中的投资类别，工具不会再次划出现金。
           </p>
@@ -385,8 +439,10 @@ export default function StrategyEditor({
         <>
           <div className="monthly-setup-summary">
             <div>
-              <span>每月固定定投</span>
-              <strong>{money(budget)}</strong>
+              <span>
+                {budgetUnit === "daily" ? "每日固定定投" : "每月固定定投"}
+              </span>
+              <strong>{money(previewBudget)}</strong>
             </div>
             <p>预算已扣除现金 · {chosen.map((a) => a.name).join(" / ")}</p>
             <button className="text-button" onClick={() => setStep(-1)}>
@@ -439,7 +495,11 @@ export default function StrategyEditor({
                 </button>
               </div>
               <div className="monthly-preview">
-                <h3>照这个比例，每月这样投</h3>
+                <h3>
+                  {budgetUnit === "daily"
+                    ? "照这个比例，每日这样投"
+                    : "照这个比例，每月这样投"}
+                </h3>
                 {chosen.map((a) => {
                   const i = p.assets.findIndex((x) => x.id === a.id);
                   return (
@@ -453,8 +513,10 @@ export default function StrategyEditor({
                   );
                 })}
                 <div className="monthly-preview-total">
-                  <span>每月合计</span>
-                  <strong>{money(budget)}</strong>
+                  <span>
+                    {budgetUnit === "daily" ? "每日合计" : "每月合计"}
+                  </span>
+                  <strong>{money(previewBudget)}</strong>
                 </div>
               </div>
               {profile &&
@@ -568,7 +630,9 @@ export default function StrategyEditor({
                 onClick={save}
               >
                 <Icon name="check" size={17} />
-                确认每月定投计划
+                {budgetUnit === "daily"
+                  ? "确认每日定投计划"
+                  : "确认每月定投计划"}
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import type { MonthlyPlan } from "./monthly";
 import type { AllocationStrategy, RiskProfile } from "./strategy";
 import type { ReviewState } from "./review";
+import { dailyIssues, type DailySettings, type AdjustmentPlan } from "./daily";
 
 export interface Asset {
   id: string;
@@ -38,6 +39,8 @@ export interface Portfolio {
   snapshot?: Snapshot;
   history?: ExecutionRecord[];
   review?: ReviewState;
+  dailySettings?: DailySettings;
+  adjustment?: AdjustmentPlan;
 }
 export const CASH_ID = "cash";
 export const MONEY_MAX = 1_000_000_000_000;
@@ -45,7 +48,10 @@ export const BUDGET_MAX = 1_000_000;
 export const cents = (n: number) => Math.round((n + Number.EPSILON) * 100);
 export const yuan = (n: number) => n / 100;
 export function newId(prefix = "asset") {
-  return `${prefix}-${crypto.randomUUID()}`;
+  const id = typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16).padStart(8, "0")).join("");
+  return `${prefix}-${id}`;
 }
 export function emptyPortfolio(): Portfolio {
   return {
@@ -120,6 +126,7 @@ export function validate(
   { forPlan = false }: { forPlan?: boolean } = {},
 ): string[] {
   const issues: string[] = [];
+  if (p.dailySettings) issues.push(...dailyIssues(p.dailySettings));
   const money = (n: number, label: string, max = MONEY_MAX) => {
     if (
       !Number.isFinite(n) ||

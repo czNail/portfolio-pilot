@@ -200,6 +200,22 @@ export default function BackupWorkspace({
               <dd>{money(pending.portfolio.monthlyPlan?.budget ?? 0)}</dd>
             </div>
             <div>
+              <dt>每日预算</dt>
+              <dd>
+                {pending.portfolio.dailySettings
+                  ? money(pending.portfolio.dailySettings.budget)
+                  : "尚未设置"}
+              </dd>
+            </div>
+            <div>
+              <dt>临时调整计划</dt>
+              <dd>
+                {pending.portfolio.adjustment
+                  ? `有，${pending.portfolio.adjustment.reviewDate} 复查`
+                  : "无"}
+              </dd>
+            </div>
+            <div>
               <dt>复查记录</dt>
               <dd>{pending.portfolio.review?.records.length ?? 0} 次</dd>
             </div>

@@ -95,6 +95,7 @@ async function mount(p: Portfolio) {
       ?.querySelector("input");
     assert.ok(el, label);
     await act(async () => {
+      el.focus();
       Object.getOwnPropertyDescriptor(
         dom.window.HTMLInputElement.prototype,
         "value",
@@ -265,6 +266,79 @@ test("完成实际调整后录入市值结束复查，保存真实结果且不�
     )!;
     assert.equal(reset.disabled, true);
     assert.equal(ui.read().review!.records[0].outcome, "actual");
+  } finally {
+    await ui.cleanup();
+  }
+});
+
+test("加法输入、每日限购、临时计划保存重载和结束，不把计划假记为成交", async () => {
+  const original = fixture(true);
+  let ui = await mount(original),
+    saved: Portfolio;
+  try {
+    await ui.input("每个扣款日总预算", "100+50.50");
+    assert.match(ui.container.textContent!, /合计 ¥150.50/);
+    await ui.input("每个扣款日总预算", "100+");
+    const save = [...ui.container.querySelectorAll("button")].find(
+      (b) => b.textContent === "保存每日定投设置",
+    )!;
+    assert.equal(save.disabled, true);
+    await ui.input("每个扣款日总预算", "100+50.50");
+    await ui.input("美股单日可买上限", "10+5");
+    await ui.click("保存每日定投设置");
+    await ui.flush();
+    assert.equal(ui.read().dailySettings!.budget, 150.5);
+    assert.equal(ui.read().dailySettings!.rules.us.dailyLimit, 15);
+    await ui.click("开始本次复查");
+    await ui.input("A 股当前总市值", "10000+5000");
+    await ui.click("保存持仓");
+    await ui.click("查看本次建议");
+    assert.match(ui.container.textContent!, /暂停 \/ 提高定投/);
+    await ui.input("临时每日总预算", "200+50");
+    await ui.click("保存临时计划，回首页");
+    await ui.flush();
+    saved = ui.read();
+    assert.equal(saved.adjustment!.dailyBudget, 250);
+    assert.equal(saved.adjustment!.kind, "recurring");
+    assert.equal(saved.review!.active, undefined);
+    assert.equal(saved.assets[0].value, original.assets[0].value);
+    assert.equal(saved.assets[1].value, 15000);
+    assert.equal(saved.dailySettings!.budget, 150.5);
+    assert.match(ui.container.textContent!, /正在执行的临时调整/);
+    assert.match(ui.container.textContent!, /网页关闭后不会提醒/);
+    assert.doesNotMatch(ui.container.textContent!, /持仓、比例或设置已变化/);
+  } finally {
+    await ui.cleanup();
+  }
+  ui = await mount(saved!);
+  try {
+    assert.match(ui.container.textContent!, /正在执行的临时调整/);
+    await ui.click("结束临时计划");
+    await ui.click("已了解，结束临时计划");
+    await ui.flush();
+    assert.equal(ui.read().adjustment, undefined);
+    assert.equal(ui.read().dailySettings!.budget, 150.5);
+    assert.equal(ui.read().assets[0].value, original.assets[0].value);
+  } finally {
+    await ui.cleanup();
+  }
+});
+
+test("按每日预算直接设置，确认金额保留到首页，不再次换算", async () => {
+  const ui = await mount(fixture());
+  try {
+    await ui.click("修改目标比例");
+    await ui.click("修改预算或类别");
+    await ui.click("按每日预算填写");
+    await ui.input("每日可定投金额", "100+50");
+    await ui.click("我已有目标比例，直接设置");
+    assert.match(ui.container.textContent!, /照这个比例，每日这样投/);
+    await ui.click("确认每日定投计划");
+    await ui.flush();
+    assert.equal(ui.read().dailySettings!.budget, 150);
+    assert.equal(ui.read().monthlyPlan!.budget, 3150);
+    assert.match(ui.container.textContent!, /每个扣款日预算/);
+    assert.doesNotMatch(ui.container.textContent!, /尚未保存为每日设置/);
   } finally {
     await ui.cleanup();
   }

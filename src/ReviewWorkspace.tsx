@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
 import type { Portfolio } from "./domain/model";
 import { capture, reviewState, type ReviewRecord } from "./domain/review";
-import { snapshotAge } from "./domain/planning";
+import { deviation, snapshotAge } from "./domain/planning";
 import { rebalance } from "./domain/rebalance";
 import { validate } from "./domain/model";
+import AdjustmentWorkspace from "./AdjustmentWorkspace";
 import HoldingsEditor from "./HoldingsEditor";
 import RebalanceDashboard from "./RebalanceDashboard";
 import { Panel, NumberField, money } from "./components";
@@ -12,6 +13,7 @@ export default function ReviewWorkspace({
   p,
   onChange,
   onPause,
+  onSaveAdjustment,
   onComplete,
   onEstimate,
   onEdit,
@@ -20,6 +22,7 @@ export default function ReviewWorkspace({
   p: Portfolio;
   onChange: (p: Portfolio) => void;
   onPause: () => void;
+  onSaveAdjustment: (p: Portfolio) => void;
   onComplete: (outcome: ReviewRecord["outcome"], next?: Portfolio) => void;
   onEstimate: () => void;
   onEdit: () => void;
@@ -171,26 +174,48 @@ export default function ReviewWorkspace({
               </button>
             </div>
           )}
-          <RebalanceDashboard
+          {plan && !issues.length && !stale && !deviation(p).breached && (
+            <Panel title="目前无需专门再平衡">
+              <p>持仓在目标容忍范围内，可以继续原定投。</p>
+              <button
+                className="btn primary"
+                disabled={blocked}
+                onClick={() => onComplete("unchanged")}
+              >
+                本次无需调整，结束复查
+              </button>
+            </Panel>
+          )}
+          <AdjustmentWorkspace
             p={p}
-            plan={plan}
-            issues={issues}
+            onSave={onSaveAdjustment}
             blocked={blocked || stale}
-            onEdit={onEdit}
-            onHoldings={() =>
-              setSession({ phase: "holdings", finishing: false })
-            }
-            onActual={() => setSession({ phase: "holdings", finishing: true })}
-            onBudget={(budget) =>
-              onChange({ ...p, budget, source: "external" })
-            }
-            onRounding={(rounding) => onChange({ ...p, rounding })}
-            onExecute={onEstimate}
-            onNoChange={() => onComplete("unchanged")}
-            reviewMode
-            mode={session.method}
-            onMode={(method) => setSession({ method })}
           />
+          <details className="panel advanced-transactions">
+            <summary>单次测算与成交记录</summary>
+            <RebalanceDashboard
+              p={p}
+              plan={plan}
+              issues={issues}
+              blocked={blocked || stale}
+              onEdit={onEdit}
+              onHoldings={() =>
+                setSession({ phase: "holdings", finishing: false })
+              }
+              onActual={() =>
+                setSession({ phase: "holdings", finishing: true })
+              }
+              onBudget={(budget) =>
+                onChange({ ...p, budget, source: "external" })
+              }
+              onRounding={(rounding) => onChange({ ...p, rounding })}
+              onExecute={onEstimate}
+              onNoChange={() => onComplete("unchanged")}
+              reviewMode
+              mode={session.method}
+              onMode={(method) => setSession({ method })}
+            />
+          </details>
           <Panel
             title="结束本次复查"
             description="保存本次结论和持仓快照，安排几个月后的下一次检查。"

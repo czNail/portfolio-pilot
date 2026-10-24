@@ -18,14 +18,14 @@ export default function MonthlyDashboard({
     return (
       <section className="welcome-card panel">
         <div className="welcome-copy">
-          <span className="pill">先规划，再按月执行</span>
+          <span className="pill">先定比例，再设置每日投入</span>
           <h2>
-            把每月定投，
+            把每日定投，
             <br />
-            安排得明明白白。
+            设置得清清楚楚。
           </h2>
           <p>
-            先确定已扣除现金后的月预算，选择愿意投资的类别，再把比例换算成每月投入清单。
+            先确定预算和目标比例，生成可以照着支付宝设置的每日清单。已有每月预算也可以沿用。
           </p>
           <button className="btn primary" onClick={() => onEdit(true)}>
             制定每月定投计划
@@ -51,7 +51,7 @@ export default function MonthlyDashboard({
             <span>03</span>
             <div>
               <strong>定投与再平衡分别指导</strong>
-              <p>平时按月执行，偏离时查看具体调整金额</p>
+              <p>平时固定扣款，偏离时选择追加、卖出或修改定投</p>
             </div>
           </div>
         </div>

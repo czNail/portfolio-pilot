@@ -24,6 +24,7 @@ import { monthlyReady } from "./domain/monthly";
 import ReviewHome from "./ReviewHome";
 import ReviewWorkspace from "./ReviewWorkspace";
 import BackupWorkspace from "./BackupWorkspace";
+import DailyWorkspace, { ActiveAdjustment } from "./DailyWorkspace";
 import {
   beginReview,
   finishReview,
@@ -257,8 +258,8 @@ export default function App() {
   };
   const pageTitles: Record<Page, [string, string]> = {
     monthly: [
-      "配置一次，几个月后再来复查",
-      "平时按原计划执行，到期核对持仓，再决定怎样调整。",
+      "每天投多少，这里看清楚",
+      "在支付宝设置定投；需要调整时，选择追加、卖出或修改每日投入。",
     ],
     plan: [
       "本次复查，知道该怎样调整",
@@ -466,6 +467,30 @@ export default function App() {
         {page === "monthly" && (
           <>
             {monthlyReady(p) && (
+              <>
+                {p.adjustment && (
+                  <ActiveAdjustment
+                    p={p}
+                    onChange={setP}
+                    onReview={openReview}
+                  />
+                )}
+                <DailyWorkspace
+                  key={p.strategy?.confirmedAt}
+                  p={p}
+                  onChange={(next) => {
+                    setP(next);
+                    setUndo(null);
+                  }}
+                  onEdit={() => {
+                    setEditorSetup(false);
+                    go("strategy");
+                  }}
+                  onReview={openReview}
+                />
+              </>
+            )}
+            {monthlyReady(p) && (
               <ReviewHome
                 p={p}
                 onChange={(next) => {
@@ -482,7 +507,7 @@ export default function App() {
             )}
             {monthlyReady(p) ? (
               <details className="long-term-plan">
-                <summary>长期定投计划与目标比例</summary>
+                <summary>原月预算与配置详情</summary>
                 {monthlyDashboard}
               </details>
             ) : (
@@ -499,6 +524,14 @@ export default function App() {
                 setUndo(null);
               }}
               onPause={() => go("monthly")}
+              onSaveAdjustment={(next) => {
+                setP(next);
+                setUndo(p);
+                go("monthly");
+                setMessage(
+                  "临时计划已保存。请在支付宝修改设置，并在手机日历添加复查提醒。",
+                );
+              }}
               onComplete={completeReview}
               onEstimate={() => {
                 executionLock.current = false;

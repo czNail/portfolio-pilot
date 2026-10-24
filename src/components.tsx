@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { parseNumberInput } from "./domain/input";
+import { parseNumberInput, parseMoneyInput } from "./domain/input";
 export const money = (n: number) =>
   new Intl.NumberFormat("zh-CN", {
     style: "currency",
@@ -85,6 +85,12 @@ export function NumberField({
     v === null || (emptyZero && v === 0) ? "" : String(v);
   const [text, setText] = useState(() => display(value));
   const focused = useRef(false);
+  const monetary = suffix === "元";
+  const invalid =
+    value !== null &&
+    (!Number.isFinite(value) ||
+      value < min ||
+      (max !== undefined && value > max));
   useEffect(() => {
     if (!focused.current && Number.isFinite(value ?? 0))
       setText(display(value));
@@ -95,10 +101,8 @@ export function NumberField({
       <div className="input-shell">
         <input
           type="text"
-          inputMode={step === "1" ? "numeric" : "decimal"}
-          aria-invalid={
-            (value !== null && !Number.isFinite(value)) || undefined
-          }
+          inputMode={monetary ? "text" : step === "1" ? "numeric" : "decimal"}
+          aria-invalid={invalid || undefined}
           value={text}
           placeholder={placeholder ?? (nullable ? "不限" : "0")}
           onFocus={(e) => {
@@ -107,15 +111,33 @@ export function NumberField({
           }}
           onBlur={() => {
             focused.current = false;
-            if (Number.isFinite(value ?? 0)) setText(display(value));
+            if (!invalid && Number.isFinite(value ?? 0) && !/[+＋]/.test(text))
+              setText(display(value));
           }}
           onChange={(e) => {
             setText(e.target.value);
-            onChange(parseNumberInput(e.target.value, nullable));
+            onChange(
+              (monetary ? parseMoneyInput : parseNumberInput)(
+                e.target.value,
+                nullable,
+              ),
+            );
           }}
         />
         <span>{suffix}</span>
       </div>
+      {monetary && /[+＋]/.test(text) && !invalid && (
+        <small className="addition-total" aria-live="polite">
+          合计 {money(value ?? 0)}
+        </small>
+      )}
+      {invalid && (
+        <small role="alert" className="danger">
+          {monetary
+            ? "请输入有效金额，可用加号相加；每项最多两位小数。"
+            : "请检查输入数值。"}
+        </small>
+      )}
       {help && <small>{help}</small>}
     </label>
   );
